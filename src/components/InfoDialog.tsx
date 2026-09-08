@@ -1,6 +1,49 @@
 import { Modal } from "./Modal";
 
-export type InfoKind = "usage" | "release" | "about";
+export type InfoKind = "usage" | "release" | "about" | "license";
+
+const WIDTH: Record<InfoKind, number> = {
+  usage: 560,
+  release: 560,
+  about: 560,
+  license: 680,
+};
+
+/** MIT License text (mirrors the repository LICENSE file). */
+const MIT_TEXT = `MIT License
+
+Copyright (c) 2026 pico
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.`;
+
+/** Main direct dependencies and their licenses (compliance summary). */
+const THIRD_PARTY: Array<{ name: string; license: string; url: string }> = [
+  { name: "CodeMirror 6 / @lezer", license: "MIT", url: "https://codemirror.net/" },
+  { name: "React", license: "MIT", url: "https://reactjs.org/" },
+  { name: "Vite", license: "MIT", url: "https://vitejs.dev/" },
+  { name: "TypeScript", license: "Apache-2.0", url: "https://www.typescriptlang.org/" },
+  { name: "KaTeX", license: "MIT", url: "https://katex.org/" },
+  { name: "mermaid", license: "MIT", url: "https://mermaid.js.org/" },
+  { name: "markdown-it", license: "MIT", url: "https://github.com/markdown-it/markdown-it" },
+  { name: "highlight.js", license: "BSD-3-Clause", url: "https://highlightjs.org/" },
+  { name: "Tauri / @tauri-apps", license: "Apache-2.0 / MIT", url: "https://tauri.app/" },
+];
 
 const CONTENT: Record<InfoKind, { title: string; body: React.ReactNode }> = {
   usage: {
@@ -58,6 +101,55 @@ const CONTENT: Record<InfoKind, { title: string; body: React.ReactNode }> = {
         <p><b>Lexora</b> v{__APP_VERSION__}</p>
         <p>轻量级 Markdown 多标签编辑器。</p>
         <p>技术栈：Rust · Tauri 2 · React · CodeMirror 6</p>
+        <p>本项目遵循 <b>MIT License</b>（© 2026 pico），详见“帮助 → 许可证…”。</p>
+      </div>
+    ),
+  },
+  license: {
+    title: "许可证",
+    body: (
+      <div className="info-body">
+        <h3>本项目：Lexora</h3>
+        <p>
+          本项目遵循 <b>MIT License</b>（Copyright © 2026 pico）。完整文本如下，
+          亦见仓库根目录 <code>LICENSE</code> 文件。
+        </p>
+        <pre className="license-text">{MIT_TEXT}</pre>
+
+        <h3>第三方组件（合规说明）</h3>
+        <p>
+          本程序使用的下列主要开源组件按各自许可证分发，本项目不修改任何第三方
+          源码，全部按其原始许可证使用：
+        </p>
+        <table className="license-table">
+          <thead>
+            <tr>
+              <th>组件</th>
+              <th>许可证</th>
+              <th>官方链接</th>
+            </tr>
+          </thead>
+          <tbody>
+            {THIRD_PARTY.map((t) => (
+              <tr key={t.name}>
+                <td>{t.name}</td>
+                <td>{t.license}</td>
+                <td>
+                  <a href={t.url} target="_blank" rel="noreferrer">
+                    {t.url.replace(/^https?:\/\//, "")}
+                  </a>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <p className="license-note">
+          上表为<b>主要直接依赖</b>汇总；其余依赖及各组件的<b>完整许可证全文</b>
+          请见各包内 <code>LICENSE</code> 文件（npm 依赖位于
+          <code> node_modules/&lt;包&gt;/LICENSE</code>；Rust crate 位于本机构建缓存的
+          对应 crate 目录内）。界面基于系统 <b>Microsoft Edge WebView2 运行时</b>，
+          按微软相关使用条款使用。
+        </p>
       </div>
     ),
   },
@@ -66,7 +158,7 @@ const CONTENT: Record<InfoKind, { title: string; body: React.ReactNode }> = {
 export function InfoDialog({ kind, onClose }: { kind: InfoKind; onClose: () => void }) {
   const c = CONTENT[kind];
   return (
-    <Modal title={c.title} onClose={onClose} width={560}>
+    <Modal title={c.title} onClose={onClose} width={WIDTH[kind]}>
       {c.body}
       <div className="modal-foot">
         <button className="btn primary" onClick={onClose}>

@@ -1100,6 +1100,7 @@ export default function App() {
         items: [
           { type: "item", label: "使用说明", onAction: () => setInfoDialog("usage") },
           { type: "item", label: "版本说明", onAction: () => setInfoDialog("release") },
+          { type: "item", label: "许可证…", onAction: () => setInfoDialog("license") },
           { type: "item", label: "关于", onAction: () => setInfoDialog("about") },
         ],
       },
