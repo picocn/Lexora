@@ -45,6 +45,12 @@ describe("image path resolution", () => {
     expect(resolveLocalImageSrc("  ", "D:\\docs")).toBeNull();
   });
 
+  it("resolves absolute paths even without a base dir (unsaved docs)", () => {
+    // PreviewPane now calls resolve with baseDir=null for unsaved documents.
+    expect(resolveLocalImageSrc("D:\\pics\\x.png", null)).toBe("D:\\pics\\x.png");
+    expect(resolveLocalImageSrc("/tmp/pic.png", null)).toBe("/tmp/pic.png");
+  });
+
   it("percent-decodes markdown-it encoded srcs before resolving", () => {
     const base = "D:\\诗词";
     expect(

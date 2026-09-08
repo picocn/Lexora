@@ -44,7 +44,7 @@ pub fn load(app: &AppHandle) -> WindowState {
 
 fn save(app: &AppHandle, state: WindowState) {
     if let (Ok(path), Ok(json)) = (state_path(app), serde_json::to_string_pretty(&state)) {
-        let _ = fs::write(path, json);
+        let _ = paths::atomic_write_text(&path, &json);
     }
 }
 

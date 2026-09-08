@@ -9,8 +9,6 @@ import {
 } from "@codemirror/view";
 import { history, defaultKeymap, historyKeymap, indentWithTab } from "@codemirror/commands";
 import {
-  syntaxHighlighting,
-  defaultHighlightStyle,
   indentOnInput,
   bracketMatching,
   foldGutter,
@@ -101,18 +99,3 @@ export function createEditorState(opts: {
   });
   return { state, comps: { lang, theme, prefs } };
 }
-
-/** Returns a new state with one compartment re-configured. */
-export function reconfigure(
-  state: EditorState,
-  comp: Compartment,
-  extension: Extension,
-): EditorState {
-  return state.update({ effects: comp.reconfigure(extension) }).state;
-}
-
-export function emptyLanguageExtension(): Extension {
-  return syntaxHighlighting(defaultHighlightStyle);
-}
-
-export { defaultKeymap, historyKeymap, searchKeymap, foldKeymap, indentWithTab };

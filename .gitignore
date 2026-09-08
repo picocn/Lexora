@@ -16,6 +16,11 @@ src-tauri/gen/schemas
 .DS_Store
 Thumbs.db
 
+# runtime dirs when a portable build runs from the repo root
+settings/
+autosave/
+
 # accidental artifacts
 debug-init.txt
 snap-trace.log
+*.log

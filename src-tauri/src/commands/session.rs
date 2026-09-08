@@ -31,7 +31,7 @@ pub fn session_save(
     let session = Session { paths, active_path };
     let path = session_path(&app)?;
     let json = serde_json::to_string_pretty(&session).map_err(|e| e.to_string())?;
-    fs::write(path, json).map_err(|e| format!("无法写会话：{e}"))
+    paths::atomic_write_text(&path, &json).map_err(|e| format!("无法写会话：{e}"))
 }
 
 #[tauri::command]

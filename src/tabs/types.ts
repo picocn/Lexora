@@ -20,6 +20,8 @@ export interface TabModel {
   diskContent: string;
   /** UTF-8 clean? Non-utf8 files warn before manual save. */
   utf8Ok: boolean;
+  /** File originally started with a UTF-8 BOM; same-file saves re-add it. */
+  utf8Bom: boolean;
   /** Language override key from the status bar menu (null = auto). */
   languageOverride: string | null;
 }

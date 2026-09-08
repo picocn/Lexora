@@ -2,7 +2,12 @@ import { useEffect, useRef } from "react";
 import { EditorView } from "@codemirror/view";
 import { EditorState } from "@codemirror/state";
 import type { Tab } from "../tabs/types";
-import { setCursorListener, setDocListener, type CursorInfo } from "../editor/docBus";
+import {
+  setCursorListener,
+  setDocListener,
+  computeCursor,
+  type CursorInfo,
+} from "../editor/docBus";
 
 export interface EditorHostProps {
   /** Active editor tab to display; undefined = empty editor. */
@@ -124,6 +129,11 @@ export function EditorHost({
     }
     if (view.state !== tab.cmState) {
       view.setState(tab.cmState);
+      // view.setState replaces the whole state without an update event, so no
+      // cursor report is emitted by the per-tab listener: publish the new
+      // state's cursor manually (fresh tab would otherwise show a blank
+      // status bar until the first keystroke).
+      onCursorRef.current?.(tab.model.id, computeCursor(tab.cmState));
     }
     activeIdRef.current = tab.model.id;
 

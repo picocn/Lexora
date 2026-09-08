@@ -1,4 +1,4 @@
-# mdpad
+# Lexora
 
 轻量级 Markdown 多标签编辑器 —— Rust (Tauri 2) + React + CodeMirror 6。
 
@@ -30,7 +30,7 @@
 - 定时（默认 5 秒，可配/可关）把每个有未保存改动的**编辑**标签写入应用数据目录恢复快照；
 - **自动保存从不覆盖原文件**；原文件唯一写入路径是用户手动保存/另存为；
 - **启动时自动恢复**上次退出时未保存（或崩溃遗留）的快照为编辑标签，内容=快照、磁盘锚点=当前文件内容，仍需手动保存才会写盘；
-- “退出 → 不保存退出”保留快照；只有“关闭单个标签 → 不保存并关闭”或恢复后放弃才删除快照。
+- “退出 → 不保存退出”为所有仍带未保存改动的标签补写最新快照并保留（下次启动自动恢复）；已撤销回到磁盘内容（不再有未保存改动）的标签会删除其过期快照；“关闭单个标签 → 不保存并关闭”删除该标签的快照。
 
 后端仅 `commands/files.rs::write_text_file` 能写真实文件；前端自动保存路径（`tabs/autosave.ts` 决策表）从不调用它——该不变式由 `src/tabs/autosave.test.ts` 覆盖。
 
@@ -46,7 +46,8 @@ npm run tauri dev      # 开发窗口
 npm test               # vitest（前端纯逻辑）
 cargo test             # 后端（在 src-tauri 内）
 npm run build          # tsc + vite build
-npx tauri build        # Windows 安装包（在 src-tauri 内执行 cargo 构建）
+npm run tauri:build    # 正式发布构建：版本号 +1（0.1.9→0.2.0 规则）后产出 Windows 安装包
+npx tauri build        # 仅构建、不升版本号（通常调试用）
 ```
 
 > 本机网络受限时：schannel 不可用则 cargo 需经本地 Node 稀疏代理

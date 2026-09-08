@@ -85,8 +85,11 @@ pub fn snapshot_write(
         title,
         modified_at_ms: now_ms(),
     };
-    fs::write(&content_path, content).map_err(|e| format!("无法写快照：{e}"))?;
-    fs::write(&meta_path, serde_json::to_string_pretty(&meta).unwrap())
+    // Content first, then metadata; both writes are atomic (temp + rename),
+    // so a crash can never truncate a snapshot file mid-write.
+    paths::atomic_write_text(&content_path, &content)
+        .map_err(|e| format!("无法写快照：{e}"))?;
+    paths::atomic_write_text(&meta_path, &serde_json::to_string_pretty(&meta).unwrap())
         .map_err(|e| format!("无法写快照元数据：{e}"))?;
     Ok(())
 }
@@ -143,6 +146,21 @@ pub fn snapshot_list(app: AppHandle) -> Result<Vec<SnapshotInfo>, String> {
     Ok(out)
 }
 
+/// True when `key` could be a snapshot file stem as produced by
+/// `sanitize_stem` (ascii alnum / `.` / `-` / `_` only). Anything containing
+/// path separators, drive letters or `..`-style segments is never treated as
+/// an on-disk file name, so a hostile key can't escape the autosave dir via
+/// `dir.join(key)`.
+fn is_safe_stem_key(key: &str) -> bool {
+    !key.is_empty()
+        && key != "."
+        && key != ".."
+        && key.len() < 200
+        && key
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_')
+}
+
 /// Resolves a caller-supplied key to an existing snapshot file stem.
 ///
 /// Two key conventions are in use, and this accepts both:
@@ -150,9 +168,12 @@ pub fn snapshot_list(app: AppHandle) -> Result<Vec<SnapshotInfo>, String> {
 ///    (e.g. `D__a.md-1a2b3c`), or
 /// 2. a raw document key (file path / untitled id) as passed to
 ///    `snapshot_write`, which needs sanitizing first.
+///
+/// Raw keys are never used to build file paths directly - only stems that
+/// pass `is_safe_stem_key` or come out of `sanitize_stem` are.
 fn resolve_stem(dir: &std::path::Path, key: &str) -> Option<String> {
     // Convention 1: the key is already the sanitized stem on disk.
-    if dir.join(format!("{key}.md")).exists() {
+    if is_safe_stem_key(key) && dir.join(format!("{key}.md")).exists() {
         return Some(key.to_string());
     }
     // Convention 2: sanitize the raw document key like snapshot_write does.
@@ -269,7 +290,25 @@ mod tests {
         );
         // 3) Unknown keys resolve to None.
         assert_eq!(resolve_stem(&dir, "does-not-exist"), None);
+        // 4) Traversal / drive-qualified keys never resolve to themselves and
+        //    cannot escape the snapshot dir (sanitized fallback misses here).
+        assert_eq!(resolve_stem(&dir, r"..\..\evil.md"), None);
+        assert_eq!(resolve_stem(&dir, "..\\..\\evil.md"), None);
+        assert_eq!(resolve_stem(&dir, "C:evil.md"), None);
+        assert_eq!(resolve_stem(&dir, "/etc/passwd"), None);
 
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn resolve_stem_ignores_safe_looking_traversal_keys() {
+        let dir = std::env::temp_dir().join(format!("lexora-snap-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        // A directory entry literally named "..\..\x" cannot exist on disk, and
+        // ".." itself must not be accepted as a stem either.
+        assert_eq!(resolve_stem(&dir, ".."), None);
+        assert_eq!(resolve_stem(&dir, "."), None);
         let _ = fs::remove_dir_all(&dir);
     }
 }

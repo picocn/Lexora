@@ -185,7 +185,7 @@ export function themeFromVscode(parsed: ParsedVscodeTheme): ResolvedTheme {
     cursorColor: cursor,
   });
 
-  const rules = parsed.rules.map((r) => ({ tag: r.tag, color: r.scopes[0] }));
+  const rules = parsed.rules.map((r) => ({ tag: r.tag, color: r.color }));
   const style = HighlightStyle.define(rules, { themeType: parsed.dark ? "dark" : "light" });
 
   // Chrome palette derived from editor colors (best effort).

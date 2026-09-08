@@ -16,7 +16,7 @@ export interface FontPickResult {
 export interface SettingsModalProps {
   settings: AppSettings;
   themeChoices: ThemeChoice[];
-  /** Persist settings then quit the app. */
+  /** Persist settings then close the dialog (does NOT quit the app). */
   onSaveAndQuit: (s: AppSettings) => void;
   /** Discard changes and close the settings dialog. */
   onCancel: () => void;
@@ -94,6 +94,7 @@ export function SettingsModal(p: SettingsModalProps) {
               type="number"
               min={1}
               max={3600}
+              step={1}
               value={draft.autosave.intervalSec}
               disabled={!draft.autosave.enabled}
               onChange={(e) =>
@@ -101,7 +102,7 @@ export function SettingsModal(p: SettingsModalProps) {
               }
             />
           </label>
-          <p className="hint">未保存的改动会定时写入应用数据目录，只有手动保存才会写入原文件。</p>
+          <p className="hint">未保存的改动会定时写入恢复快照（程序目录 autosave\，不可写时回退系统目录），只有手动保存才会写入原文件。</p>
         </fieldset>
 
         <fieldset>
@@ -123,6 +124,7 @@ export function SettingsModal(p: SettingsModalProps) {
               type="number"
               min={8}
               max={96}
+              step={1}
               value={draft.editor.fontSize}
               onChange={(e) =>
                 set("editor", { ...draft.editor, fontSize: Math.max(8, +e.target.value) })
@@ -149,6 +151,7 @@ export function SettingsModal(p: SettingsModalProps) {
               type="number"
               min={1}
               max={16}
+              step={1}
               value={draft.editor.tabSize}
               onChange={(e) =>
                 set("editor", { ...draft.editor, tabSize: Math.min(16, Math.max(1, +e.target.value)) })
@@ -192,6 +195,7 @@ export function SettingsModal(p: SettingsModalProps) {
               type="number"
               min={8}
               max={96}
+              step={1}
               value={draft.preview.fontSize}
               onChange={(e) =>
                 set("preview", { ...draft.preview, fontSize: Math.max(8, +e.target.value) })

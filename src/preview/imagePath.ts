@@ -1,6 +1,8 @@
 // Resolving local images referenced from markdown documents.
 // In Tauri the webview cannot read arbitrary local files directly, so local
-// paths are converted to the asset protocol URL via convertFileSrc.
+// image paths are resolved here and then read through the Rust command
+// (read_image_base64) into base64 data: URLs - the asset protocol is not used
+// because percent-encoded / CJK / space-heavy paths break on it.
 
 const SEP = /[\\/]/;
 
@@ -79,7 +81,3 @@ export function resolveLocalImageSrc(src: string, baseDir: string | null): strin
   return joinPath(baseDir, trimmed);
 }
 
-/** Whether we're running inside the Tauri webview (asset protocol available). */
-export function inTauri(): boolean {
-  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
-}

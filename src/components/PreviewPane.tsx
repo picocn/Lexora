@@ -55,8 +55,9 @@ export const PreviewPane = forwardRef<PreviewPaneHandle, PreviewPaneProps>(
     }, [text, debounceMs]);
 
     // After every HTML refresh: render mermaid diagrams and fix up local image
-    // srcs (relative paths are resolved against the document's folder, then
-    // converted to the Tauri asset protocol URL).
+    // srcs (relative paths resolve against the document's folder; absolute
+    // paths work even for unsaved docs). Local files are read via the Rust
+    // command into base64 data URLs.
     const postProcessTimer = useRef<number | null>(null);
     useEffect(() => {
       const el = scrollRef.current;
@@ -170,15 +171,18 @@ function offsetTopIn(container: HTMLElement, child: HTMLElement): number {
 
 /**
  * Rewrites <img src> of local files so the webview can load them.
- * - http(s)/data URLs are left untouched.
- * - Relative paths are resolved against the document directory.
+ * - http(s)/data URLs are left untouched (resolveLocalImageSrc rejects them).
+ * - Relative paths are resolved against the document directory (basePath).
+ * - Absolute local paths are resolved even when the doc is unsaved
+ *   (basePath == null).
  * - Local files are read through the Rust command into a base64 data URL
  *   (robust for CJK / space / any-character paths - the asset protocol and
  *   percent-encoding are deliberately not used here).
  */
 async function fixupImages(container: HTMLElement, basePath: string | null): Promise<void> {
-  if (!basePath) return; // nothing to resolve without a document path
-  const baseDir = dirnameOf(basePath);
+  // Relative srcs need a document dir; absolute srcs don't (resolveLocalImageSrc
+  // handles those without baseDir). So baseDir may legitimately be null here.
+  const baseDir = basePath ? dirnameOf(basePath) : null;
   const imgs = Array.from(container.querySelectorAll<HTMLImageElement>("img"));
   if (!imgs.length) return;
 
@@ -187,7 +191,6 @@ async function fixupImages(container: HTMLElement, basePath: string | null): Pro
     if (!src) continue;
     const local = resolveLocalImageSrc(src, baseDir);
     if (!local) continue; // remote/data URLs render natively
-    if (local.startsWith("data:")) continue;
     try {
       const mime = mimeOfPath(local);
       const b64 = await readImageBase64(local);

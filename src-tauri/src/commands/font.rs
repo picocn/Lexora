@@ -88,13 +88,18 @@ fn lfheight_to_point_size(lf_height: c_int) -> f64 {
 /// Opens the Windows font dialog. `current_family` seeds the initial face and
 /// `current_size_pt` seeds the initial size; returns what the user chose, or
 /// None when they cancelled.
+///
+/// `async`: sync Tauri commands run inline on the WebView2/main thread, so a
+/// blocking dialog there would freeze the whole UI. An async command body runs
+/// on the async runtime's worker thread; the spawned dialog thread blocks only
+/// that worker while the modal is open.
 #[tauri::command]
-pub fn pick_system_font(
+pub async fn pick_system_font(
     current_family: Option<String>,
     current_size_pt: Option<f64>,
 ) -> Result<Option<FontPick>, String> {
     // Run the modal dialog on a dedicated thread that seeds its own message
-    // queue, so it never blocks Tauri's command executor.
+    // queue, so it never blocks the async runtime's main responsibilities.
     let handle = std::thread::spawn(move || {
         let initial_family = current_family.unwrap_or_else(|| "Microsoft YaHei".to_string());
         let size_pt = current_size_pt.unwrap_or(14.0);

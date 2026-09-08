@@ -1,8 +1,8 @@
-# mdpad 验收清单（手动）
+# Lexora 验收清单（手动）
 
 ## 构建门禁（已自动化验证）
-- [x] `cargo test`（Rust 5/5）
-- [x] `vitest run`（前端 31/31：标签状态机、预览标签、自动保存决策表、VS Code 主题解析、markdown html:false）
+- [x] `cargo test`（Rust 8/8：快照读写、settings、base64 图片）
+- [x] `vitest run`（前端 42/42：标签状态机、预览标签、自动保存决策表、VS Code 主题解析、图片路径解析、markdown 渲染）
 - [x] `tsc --noEmit`
 - [x] `npm run build`（vite 产物）
 - [x] `cargo clippy --all-targets` 无 error

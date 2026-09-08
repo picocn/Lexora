@@ -5,6 +5,8 @@ export interface ScopeRule {
   /** Selectors this rule applies to (verbatim from tokenColors). */
   scopes: string[];
   tag: Tag;
+  /** The rule's text color (settings.foreground). */
+  color: string;
 }
 
 export interface ParsedVscodeTheme {
@@ -91,7 +93,7 @@ export function parseVscodeTheme(raw: unknown): ParsedVscodeTheme | null {
       // A rule may list comma-separated selectors; treat each selector as its
       // own scope chain item but keep file order for first-match-wins.
       const tag = pickTag(scopeRaw.split(",").map((s) => s.trim()).filter(Boolean));
-      if (tag) rules.push({ scopes: [scopeRaw], tag });
+      if (tag) rules.push({ scopes: [scopeRaw], tag, color: fg });
     }
   }
 

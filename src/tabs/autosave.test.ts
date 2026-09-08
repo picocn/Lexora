@@ -15,6 +15,7 @@ function tabWith(content: string, diskContent: string, path: string | null = "D:
     manualSaved: path != null,
     diskContent,
     utf8Ok: true,
+    utf8Bom: false,
     languageOverride: null as string | null,
   };
   const state: EditorState = EditorState.create({ doc: content });

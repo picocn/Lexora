@@ -4,6 +4,8 @@ import { open, save } from "@tauri-apps/plugin-dialog";
 export interface FileReadResult {
   content: string;
   utf8Ok: boolean;
+  /** File started with a UTF-8 BOM (re-added on same-file saves). */
+  utf8Bom: boolean;
   byteLen: number;
 }
 
@@ -50,9 +52,10 @@ export const DEFAULT_SETTINGS: AppSettings = {
   recentFiles: [],
 };
 
-/** Native open dialog + read. Returns null when the user cancels. */
+/** Native open dialog + read. Returns null when the user cancels; when the
+ * pick succeeded but the read failed, returns { path, error }. */
 export async function pickAndReadFile(): Promise<
-  { path: string; read: FileReadResult } | { path: string; read: null } | null
+  { path: string; read: FileReadResult } | { path: string; error: string } | null
 > {
   const picked = await open({
     multiple: false,
@@ -63,8 +66,8 @@ export async function pickAndReadFile(): Promise<
   try {
     const read = await invoke<FileReadResult>("read_text_file", { path: picked });
     return { path: picked, read };
-  } catch {
-    return { path: picked, read: null };
+  } catch (e) {
+    return { path: picked, error: String(e) };
   }
 }
 

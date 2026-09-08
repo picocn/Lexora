@@ -310,6 +310,7 @@ export default function App() {
             path,
             diskContent: r.content,
             utf8Ok: r.utf8Ok,
+            utf8Bom: r.utf8Bom,
             content: r.content,
             langExt,
             theme: themeExt,
@@ -327,8 +328,12 @@ export default function App() {
   const onOpen = useCallback(async () => {
     const picked = await pickAndReadFile();
     if (!picked) return;
-    if (picked.read) await openPathAsTab(picked.path);
-    else setNotice(`读取 ${picked.path} 失败`);
+    if ("read" in picked) {
+      await openPathAsTab(picked.path);
+      return;
+    }
+    const reason = "error" in picked ? `：${picked.error}` : "";
+    setNotice(`读取 ${picked.path} 失败${reason}`);
   }, [openPathAsTab]);
 
   const onNew = useCallback(() => {
@@ -352,24 +357,38 @@ export default function App() {
       if (!id) return false;
       const tab = store.getTab(tabsRef.current, id);
       if (!tab || !isEditor(tab)) return false;
-      if (!tab.model.utf8Ok) setNotice("原文件非 UTF-8 编码，保存将写为 UTF-8。");
       const content = tabText(tab);
       let target = forcePick ? null : tab.model.path;
       if (!target) {
         target = await pickSavePath(tab.model.path ?? `${tab.model.title}.md`);
         if (!target) return false;
       }
+      const sameFile = target === tab.model.path;
+      // Non-UTF-8 originals were lossily decoded on open; overwriting them in
+      // place would destroy the original bytes. Refuse and guide to Save As.
+      if (!tab.model.utf8Ok && sameFile && !forcePick) {
+        setNotice("原文件不是 UTF-8 编码：为避免覆盖损坏，请用「另存为」转存为 UTF-8 文件。");
+        return false;
+      }
+      // Re-add the UTF-8 BOM when saving over the BOM'd file in place.
+      const text = sameFile && tab.model.utf8Bom ? `\uFEFF${content}` : content;
       try {
-        await writeTextFile(target, content);
+        await writeTextFile(target, text);
       } catch (e) {
         setNotice(`保存失败：${e}`);
         return false;
       }
       const oldKey = tab.model.docKey;
-      setTabsState((prev) => store.markSaved(prev, tab.model.id, target, content));
-      snapshotRemove(oldKey).catch(() => {});
+      const newBom = sameFile && tab.model.utf8Bom;
+      setTabsState((prev) => store.markSaved(prev, tab.model.id, target, content, newBom));
+      // Awaited so the stale snapshot is gone before the process can exit
+      // (prevents resurrecting older content on the next launch).
+      try {
+        await snapshotRemove(oldKey);
+      } catch {
+        /* ignore */
+      }
       if (target !== oldKey) pushRecent(target);
-      setNotice((n) => (n && n.includes("UTF-8") ? n : null));
       return true;
     },
     [pushRecent],
@@ -405,32 +424,53 @@ export default function App() {
       const tab = store.getTab(tabsRef.current, tabId);
       if (!tab) return;
       if (isEditor(tab) && tabDirty(tab)) setConfirmClose({ tabId, quit: false });
-      else setTabsState((prev) => store.closeTab(prev, tabId));
-    },
-    [],
-  );
-
-  const doDiscardAndClose = useCallback(
-    (ids: string[]) => {
-      for (const id of ids) {
-        const tab = store.getTab(tabsRef.current, id);
-        if (tab && isEditor(tab)) snapshotRemove(tab.model.docKey).catch(() => {});
+      else {
+        // Closing a clean tab: drop any stale recovery snapshot so content the
+        // user undid (or emptied) can't resurrect on the next launch.
+        if (isEditor(tab) && tab.model.docKey && tab.lastSnapshotContent != null) {
+          snapshotRemove(tab.model.docKey).catch(() => {});
+        }
+        setTabsState((prev) => store.closeTab(prev, tabId));
       }
-      setTabsState((prev) => ids.reduce((acc, id) => store.closeTab(acc, id), prev));
     },
     [],
   );
 
-  /** Persists a fresh snapshot for every dirty editor tab (used when quitting
-   * without saving, so nothing is lost and snapshots are kept). */
-  const refreshSnapshotsForDirty = useCallback(async () => {
-    const dirty = tabsRef.current.tabs.filter((t) => isEditor(t) && tabDirty(t));
-    for (const tab of dirty) {
-      const content = tabText(tab);
-      try {
-        await snapshotWrite(tab.model.docKey, content, tab.model.title, tab.model.path);
-      } catch {
-        /* keep going; next launch may use an older snapshot */
+  const doDiscardAndClose = useCallback(async (ids: string[]) => {
+    for (const id of ids) {
+      const tab = store.getTab(tabsRef.current, id);
+      if (tab && isEditor(tab)) {
+        try {
+          await snapshotRemove(tab.model.docKey);
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+    setTabsState((prev) => ids.reduce((acc, id) => store.closeTab(acc, id), prev));
+  }, []);
+
+  /** Persists a fresh snapshot for every dirty editor tab and drops stale
+   * snapshots of clean tabs (used when quitting without saving, so the next
+   * launch restores exactly the current unsaved state - nothing more). */
+  const syncSnapshotsForExit = useCallback(async () => {
+    for (const tab of tabsRef.current.tabs) {
+      if (!isEditor(tab)) continue;
+      const docKey = tab.model.docKey;
+      if (!docKey) continue;
+      if (tabDirty(tab)) {
+        const content = tabText(tab);
+        try {
+          await snapshotWrite(docKey, content, tab.model.title, tab.model.path);
+        } catch {
+          /* keep going; next launch may use an older snapshot */
+        }
+      } else if (tab.lastSnapshotContent != null) {
+        try {
+          await snapshotRemove(docKey);
+        } catch {
+          /* ignore */
+        }
       }
     }
   }, []);
@@ -451,8 +491,8 @@ export default function App() {
             if (!ok) return; // 用户取消保存对话框或写入失败：中止退出
           }
         } else {
-          // 不保存退出：保留快照（绝不删除），补写最新内容后退出。
-          await refreshSnapshotsForDirty();
+          // 不保存退出：快照保留，同步为当前未保存状态后退出。
+          await syncSnapshotsForExit();
         }
         await forceQuit();
         return;
@@ -467,10 +507,10 @@ export default function App() {
         setTabsState((prev) => store.closeTab(prev, id));
       } else {
         // 不保存并关闭：删除该标签快照后关闭。
-        doDiscardAndClose([id]);
+        await doDiscardAndClose([id]);
       }
     },
-    [confirmClose, saveTabById, doDiscardAndClose, refreshSnapshotsForDirty, forceQuit],
+    [confirmClose, saveTabById, doDiscardAndClose, syncSnapshotsForExit, forceQuit],
   );
 
   // ---- doc change routing -----------------------------------------------------
@@ -560,6 +600,9 @@ export default function App() {
       const tag = (e.target as HTMLElement | null)?.tagName ?? "";
       const inField = tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
       const k = e.key.toLowerCase();
+      // While a modal is open, editor/app shortcuts must not fire on the tab
+      // underneath it (e.g. Ctrl+W closing a tab below the settings dialog).
+      if (showSettings || infoDialog || confirmClose) return;
       if (mod && k === "s") {
         e.preventDefault();
         if (e.shiftKey) void onSaveAs();
@@ -586,7 +629,19 @@ export default function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onNew, onOpen, onSave, onSaveAs, requestCloseTab, cycleLayout, activeIsMarkdown, onPreview]);
+  }, [
+    onNew,
+    onOpen,
+    onSave,
+    onSaveAs,
+    requestCloseTab,
+    cycleLayout,
+    activeIsMarkdown,
+    onPreview,
+    showSettings,
+    infoDialog,
+    confirmClose,
+  ]);
 
   // ---- language override -------------------------------------------------------
   const onLanguageChange = useCallback(async (key: string) => {
@@ -667,6 +722,13 @@ export default function App() {
         if (originalPath) {
           const existing = store.findByPath(tabsRef.current, originalPath);
           if (existing) {
+            // The file is already open (session reopen or a previous restore):
+            // drop the snapshot so it stops being offered on every launch.
+            try {
+              await snapshotRemove(key);
+            } catch {
+              /* ignore */
+            }
             setNotice(`“${existing.model.title}” 已打开，未恢复该快照`);
             return;
           }
@@ -674,11 +736,14 @@ export default function App() {
 
         let restoredPath: string | null = null;
         let diskContent = "";
+        let diskBom = false;
         if (originalPath) {
           try {
             if (await pathExists(originalPath)) {
+              const disk = await readTextFile(originalPath);
               restoredPath = originalPath;
-              diskContent = (await readTextFile(originalPath)).content;
+              diskContent = disk.content;
+              diskBom = disk.utf8Bom;
             }
           } catch {
             restoredPath = null;
@@ -692,6 +757,7 @@ export default function App() {
               path: restoredPath,
               diskContent,
               utf8Ok: true,
+              utf8Bom: diskBom,
               content: snap.content,
               langExt,
               theme: themeExt,
@@ -718,10 +784,12 @@ export default function App() {
   // or a crash. Each snapshot reopens as a tab whose content = snapshot and
   // whose disk anchor = the file's current on-disk content (manual save is
   // still required to write it back).
-  // 保证启动恢复只执行一次（restoreSnapshot 依赖 prefs/themeExt，settings
-  // 异步加载后其引用会变化并触发本 effect 重跑；用 ref 忽略后续执行）。
+  // 启动恢复必须在 settings 加载完成之后执行（gate 在 `settings` 上）：恢复的
+  // 标签要用真实的主题/字体，且 session 激活、默认新建标签等收尾逻辑不能因
+  // settings 提交导致的 effect 清理（cancelled）而被跳过。
   const startupRestoreDone = useRef(false);
   useEffect(() => {
+    if (!settings) return; // wait for the settings boot
     if (startupRestoreDone.current) return;
     startupRestoreDone.current = true;
     let cancelled = false;
@@ -777,7 +845,7 @@ export default function App() {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [restoreSnapshot]);
+  }, [settings, restoreSnapshot]);
 
   // ---- menu bar ---------------------------------------------------------------
   const layout = settings?.layout ?? "edit";

@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use tauri::Manager;
 
@@ -42,6 +42,30 @@ fn cached(kind: DirKind) -> &'static Option<PathBuf> {
         DirKind::Settings => SETTINGS.get_or_init(|| try_exe_subdir("settings")),
         DirKind::Autosave => AUTOSAVE.get_or_init(|| try_exe_subdir("autosave")),
     }
+}
+
+/// Atomically replaces `path` with `content`: writes a temp file in the same
+/// directory then renames it over the target. A crash mid-write can never
+/// leave a truncated settings/session/snapshot/user file behind (rename is
+/// atomic on the same volume on Windows).
+pub fn atomic_write_text(path: &Path, content: &str) -> std::io::Result<()> {
+    let dir = match path.parent() {
+        Some(p) if !p.as_os_str().is_empty() => p.to_path_buf(),
+        _ => PathBuf::from("."),
+    };
+    let file_name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "out".to_string());
+    let tmp = dir.join(format!(".{file_name}.{}.tmp", std::process::id()));
+    let result = (|| {
+        fs::write(&tmp, content)?;
+        fs::rename(&tmp, path)
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&tmp);
+    }
+    result
 }
 
 /// Primary settings dir: `<exe_dir>/settings` if writable, else the per-user

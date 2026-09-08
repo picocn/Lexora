@@ -16,8 +16,9 @@ const CONTENT: Record<InfoKind, { title: string; body: React.ReactNode }> = {
         </ul>
         <h3>自动保存（快照模式）</h3>
         <p>
-          编辑中的改动会定时写入应用数据目录的恢复快照，<b>绝不覆盖原文件</b>。
-          只有手动保存 / 另存为才会写原文件。启动时若检测到快照会提示恢复。
+          编辑中的改动会定时写入恢复快照（默认存于程序目录的 <b>autosave</b> 文件夹；
+          程序目录不可写时自动回退到系统应用数据目录），<b>绝不覆盖原文件</b>。
+          只有手动保存 / 另存为才会写原文件。启动时检测到快照会<b>自动恢复</b>为编辑标签。
         </p>
         <h3>Markdown 预览</h3>
         <p>
@@ -41,7 +42,7 @@ const CONTENT: Record<InfoKind, { title: string; body: React.ReactNode }> = {
           <li>内置浅色/深色主题，支持导入 VS Code 主题 JSON。</li>
           <li>字体 / 字号 / 行高 / 布局等设置持久化。</li>
         </ul>
-        <p>限制：文件按 UTF-8 处理（非 UTF-8 尽力解码并提示）；预览不执行脚本。</p>
+        <p>编码：UTF-8（含 BOM）正常读写；UTF-16/32 文件会提示先转存 UTF-8；其他非 UTF-8 编码尽力解码显示，但不允许原地覆盖（请用“另存为”转存）。预览不执行脚本。</p>
       </div>
     ),
   },

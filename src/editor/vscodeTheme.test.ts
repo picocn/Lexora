@@ -62,6 +62,16 @@ describe("parseVscodeTheme", () => {
     expect(parsed.rules[0].tag).toBe(t.keyword);
   });
 
+  it("keeps each rule's foreground color", () => {
+    const parsed = parseVscodeTheme(DARK_PLUS)!;
+    const byScope = new Map(parsed.rules.map((r) => [r.scopes[0], r]));
+    expect(byScope.get("comment")!.color).toBe("#6a9955");
+    expect(byScope.get("string")!.color).toBe("#ce9178");
+    expect(byScope.get("keyword")!.color).toBe("#c586c0");
+    expect(byScope.get("entity.name.type")!.color).toBe("#4ec9b0");
+    expect(byScope.get("invalid")!.color).toBe("#f44747");
+  });
+
   it("returns null for garbage input", () => {
     expect(parseVscodeTheme(null)).toBeNull();
     expect(parseVscodeTheme("nope")).toBeNull();

@@ -1,6 +1,6 @@
 import { EditorState, type Extension } from "@codemirror/state";
 import type { TabsState, Tab, TabModel } from "./types";
-import { tabDirty, isPreview } from "./types";
+import { tabDirty, isPreview, isEditor } from "./types";
 import { createEditorState, prefsExtension, type EditorPrefs } from "../editor/cmCore";
 
 export function basename(p: string): string {
@@ -72,6 +72,7 @@ export function openFile(state: TabsState, opts: {
   path: string;
   diskContent: string;
   utf8Ok: boolean;
+  utf8Bom?: boolean;
   content: string;
   langExt: Extension | null;
   theme: Extension;
@@ -92,6 +93,7 @@ export function openFile(state: TabsState, opts: {
     manualSaved: true, // file already exists on disk
     diskContent: opts.diskContent,
     utf8Ok: opts.utf8Ok,
+    utf8Bom: opts.utf8Bom ?? false,
     languageOverride: null,
   };
   const tab = freshTab({ model, content: opts.content, langExt: opts.langExt, theme: opts.theme, prefs: opts.prefs });
@@ -115,6 +117,7 @@ export function newUntitled(state: TabsState, opts: {
     manualSaved: false,
     diskContent: "",
     utf8Ok: true,
+    utf8Bom: false,
     languageOverride: null,
   };
   const tab = freshTab({ model, content: opts.content ?? "", langExt: null, theme: opts.theme, prefs: opts.prefs });
@@ -151,6 +154,7 @@ export function openPreview(state: TabsState, opts: {
     manualSaved: false,
     diskContent: "",
     utf8Ok: true,
+    utf8Bom: false,
     languageOverride: null,
   };
   const tab = freshTab({ model, content: "", langExt: null, theme: opts.theme, prefs: opts.prefs });
@@ -180,17 +184,19 @@ export function patchModel(state: TabsState, id: string, patch: Partial<TabModel
 
 /** Records that the current content was persisted to a real file by a manual
  * save. Clears the snapshot anchor so a future autosave can snapshot again
- * after the next edit. */
+ * after the next edit. Manual-save semantics only apply to editor tabs:
+ * preview tabs are never touched. */
 export function markSaved(
   state: TabsState,
   id: string,
   path: string,
   content: string,
+  utf8Bom = false,
 ): TabsState {
   return {
     ...state,
     tabs: state.tabs.map((t) => {
-      if (t.model.id !== id) return t;
+      if (t.model.id !== id || !isEditor(t)) return t;
       return {
         ...t,
         lastSnapshotContent: null,
@@ -200,6 +206,8 @@ export function markSaved(
           docKey: path,
           title: basename(path),
           manualSaved: true,
+          utf8Ok: true, // the file on disk is now UTF-8
+          utf8Bom, // reflects the BOM that was actually written
           diskContent: content,
         },
       };
@@ -281,10 +289,4 @@ export function closeTab(state: TabsState, id: string): TabsState {
 export function isDirty(state: TabsState, id: string): boolean {
   const t = getTab(state, id);
   return t ? tabDirty(t) : false;
-}
-
-export function nextTabId(state: TabsState): string | null {
-  if (!state.activeId || state.tabs.length < 2) return null;
-  const idx = state.tabs.findIndex((t) => t.model.id === state.activeId);
-  return state.tabs[(idx + 1) % state.tabs.length].model.id;
 }

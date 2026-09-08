@@ -195,8 +195,14 @@ describe("预览标签页", () => {
     expect(isEditor(pv)).toBe(false);
     expect(tabDirty(pv)).toBe(false);
     expect(isDirty(s, pv.model.id)).toBe(false);
-    // Manual-save semantics only apply to editors.
+    // Manual-save semantics only apply to editors: markSaved on a preview id
+    // must leave the preview tab (model incl.) completely untouched.
+    const pvModelBefore = { ...pv.model };
     s = markSaved(s, pv.model.id, FILE_B, "whatever");
-    expect(findPreviewFor(s, sourceId)).toBeDefined();
+    const pvAfter = findPreviewFor(s, sourceId)!;
+    expect(pvAfter).toBeDefined();
+    expect(pvAfter.model).toEqual(pvModelBefore);
+    expect(pvAfter.model.path).toBeNull();
+    expect(pvAfter.model.docKey).toBe(pv.model.docKey);
   });
 });
