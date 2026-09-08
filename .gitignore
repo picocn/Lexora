@@ -1,0 +1,21 @@
+# dependencies & build output
+node_modules
+dist
+src-tauri/target
+src-tauri/gen/schemas
+
+# local/portable test scratch dirs
+.smoke*/
+.portable-test
+.restore-*/
+.npm-cache
+.cargo-home
+
+# editor / OS
+*.local
+.DS_Store
+Thumbs.db
+
+# accidental artifacts
+debug-init.txt
+snap-trace.log
