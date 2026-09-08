@@ -34,6 +34,8 @@ import {
   sessionLoad,
   pickSystemFont,
   ptToPx,
+  benchTargets,
+  processMemKb,
 } from "./ipc/commands";
 import type { TabsState, Tab } from "./tabs/types";
 import { tabDirty, tabText, isPreview, isEditor } from "./tabs/types";
@@ -967,6 +969,53 @@ export default function App() {
     startupRestoreDone.current = true;
     let cancelled = false;
     (async () => {
+      // ---- internal performance benchmark (only when bench-targets.json exists)
+      try {
+        const bt = await benchTargets();
+        if (bt && bt.files.length > 0) {
+          const rows: Array<{ count: number; openMs: number; memKb: number; chars: number }> = [];
+          const startedAt = performance.now();
+          for (let i = 0; i < bt.files.length; i++) {
+            const p = bt.files[i];
+            const t0 = performance.now();
+            try {
+              const r = await readTextFile(p);
+              const langExt = await languageForFile(p);
+              setTabsState((prev) =>
+                store.openFile(prev, {
+                  path: p,
+                  diskContent: r.content,
+                  utf8Ok: r.utf8Ok,
+                  utf8Bom: r.utf8Bom,
+                  content: r.content,
+                  langExt,
+                  theme: themeExt,
+                  prefs,
+                }),
+              );
+              // Give React + CodeMirror time to mount the new 100MB tab.
+              await new Promise((res) => setTimeout(res, 400));
+              const memKb = await processMemKb();
+              rows.push({ count: i + 1, openMs: Math.round(performance.now() - t0), memKb, chars: r.content.length });
+            } catch (e) {
+              rows.push({ count: i + 1, openMs: Math.round(performance.now() - t0), memKb: 0, chars: 0 });
+            }
+            try {
+              await writeTextFile(bt.out, JSON.stringify({
+                elapsedMs: Math.round(performance.now() - startedAt),
+                rows,
+              }, null, 2));
+            } catch {
+              /* ignore */
+            }
+          }
+          setAutosaveText(`基准测试：已完成 ${rows.length} 个文件`);
+          setNotice(`基准测试完成：依次打开 ${rows.length} 个约 100MB 的 markdown 文件`);
+          return;
+        }
+      } catch {
+        /* not in tauri / no targets: normal startup */
+      }
       try {
         const items = await snapshotList();
         if (items.length) {

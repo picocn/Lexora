@@ -5,3 +5,5 @@ pub mod session;
 
 #[cfg(windows)]
 pub mod font;
+#[cfg(windows)]
+pub mod bench;

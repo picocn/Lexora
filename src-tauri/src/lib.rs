@@ -36,6 +36,10 @@ pub fn run() {
             exit_app,
             #[cfg(windows)]
             commands::font::pick_system_font,
+            #[cfg(windows)]
+            commands::bench::bench_targets,
+            #[cfg(windows)]
+            commands::bench::process_mem_kb,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

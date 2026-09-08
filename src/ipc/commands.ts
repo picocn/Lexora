@@ -172,3 +172,24 @@ export function pickSystemFont(
 export function ptToPx(pt: number): number {
   return Math.max(1, Math.round((pt * 4) / 3));
 }
+
+// ---- internal performance benchmark (inert unless bench-targets.json exists)
+
+export interface BenchTargets {
+  files: string[];
+  out: string;
+}
+
+/** Returns the bench targets when `settings/bench-targets.json` exists. */
+export async function benchTargets(): Promise<BenchTargets | null> {
+  try {
+    return await invoke<BenchTargets>("bench_targets");
+  } catch {
+    return null;
+  }
+}
+
+/** Current process working-set size in KiB. */
+export function processMemKb(): Promise<number> {
+  return invoke<number>("process_mem_kb");
+}
