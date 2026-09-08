@@ -1126,7 +1126,6 @@ export default function App() {
     "--tab-active-bg": palette.tabActiveBg,
     "--accent": palette.accent,
     "--panel-bg": palette.panelBg,
-    "--status-bg": palette.statusBg,
   } as CSSProperties;
 
   // Content shown by a preview tab = its source editor text.

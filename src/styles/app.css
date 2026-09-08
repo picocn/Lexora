@@ -568,7 +568,9 @@ body {
   padding: 2px 10px;
   font-size: 12px;
   border-top: 1px solid var(--border-soft);
-  background: var(--status-bg);
+  /* 状态栏背景/字体与窗口最顶行（标题栏）保持一致：都取 --panel-bg / --fg，
+     与所选主题无关（--status-bg 不再使用，避免导入主题时出现蓝色状态栏）。 */
+  background: var(--panel-bg);
   color: var(--fg);
   gap: 12px;
   user-select: none;
