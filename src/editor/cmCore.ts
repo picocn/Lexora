@@ -37,6 +37,27 @@ export interface CreatedState {
   comps: TabCompartments;
 }
 
+/** Chinese translations for CodeMirror's built-in panel UI (search/replace
+ * panel, a11y announcements). Keys are the exact English source strings. */
+export const CM_PHRASES: Record<string, string> = {
+  Find: "查找",
+  Replace: "替换",
+  next: "下一个",
+  previous: "上一个",
+  all: "全部",
+  "match case": "区分大小写",
+  regexp: "正则",
+  "by word": "整词",
+  replace: "替换",
+  "replace all": "全部替换",
+  close: "关闭",
+  "current match": "当前匹配",
+  "on line": "位于行",
+  "Go to line": "跳转到行",
+  max: "最大",
+  go: "跳转",
+};
+
 export const baseExtensions: Extension[] = [
   history(),
   drawSelection(),
@@ -83,6 +104,7 @@ export function createEditorState(opts: {
     doc: opts.doc,
     extensions: [
       ...baseExtensions,
+      EditorState.phrases.of(CM_PHRASES),
       EditorView.updateListener.of((update) => {
         if (update.docChanged) {
           reportDocChange(tabId, update.state);

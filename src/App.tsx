@@ -2,6 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, 
 import type { EditorState, Extension } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { undo, redo, selectAll } from "@codemirror/commands";
+import {
+  openSearchPanel,
+  getSearchQuery,
+  replaceAll,
+  type SearchQuery,
+} from "@codemirror/search";
 import type { AppSettings } from "./ipc/commands";
 import {
   readSettings,
@@ -42,6 +48,7 @@ import { PreviewPane, type PreviewPaneHandle } from "./components/PreviewPane";
 import { SettingsModal, firstFamilyOf } from "./components/SettingsModal";
 import { CloseConfirm } from "./components/CloseConfirm";
 import { InfoDialog, type InfoKind } from "./components/InfoDialog";
+import { Modal } from "./components/Modal";
 import { viewTabs } from "./components/appState";
 
 const THEME_STORAGE_KEY = "lexora.vscodeThemes.v1";
@@ -102,6 +109,35 @@ export function labelForName(name: string): string {
   return "纯文本";
 }
 
+/** Escapes a string for literal use inside a RegExp. */
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** Counts how many times `query` matches in the editor state's document
+ * (used for the replace-all confirmation). Case/whole-word/regexp aware and
+ * non-overlapping, mirroring CodeMirror's own matching semantics. */
+function countQueryMatches(state: EditorState, query: SearchQuery): number {
+  const text = state.doc.toString();
+  let needle = query.search;
+  if (!query.regexp && !query.literal) {
+    needle = needle.replace(/\\n/g, "\n").replace(/\\r/g, "\r").replace(/\\t/g, "\t");
+  }
+  const body = query.regexp ? needle : escapeRegExp(needle);
+  const whole = query.wholeWord
+    ? `(?:^|[^\\p{L}\\p{N}_])(${body})(?=$|[^\\p{L}\\p{N}_])`
+    : body;
+  const flags = `g${query.caseSensitive ? "" : "i"}u`;
+  try {
+    let count = 0;
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    for (const _m of text.matchAll(new RegExp(whole, flags))) count++;
+    return count;
+  } catch {
+    return 0; // invalid regexp (query.valid should already have guarded)
+  }
+}
+
 export default function App() {
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [tabsState, setTabsState] = useState<TabsState>(() => store.emptyState());
@@ -112,6 +148,8 @@ export default function App() {
   const [autosaveText, setAutosaveText] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
   const [cursorInfo, setCursorInfo] = useState<CursorInfo | null>(null);
+  /** Pending "全部替换" confirmation: number of matches that would change. */
+  const [replaceConfirmCount, setReplaceConfirmCount] = useState<number | null>(null);
 
   const tabsRef = useRef(tabsState);
   tabsRef.current = tabsState;
@@ -581,6 +619,71 @@ export default function App() {
     }
   }, []);
 
+  // ---- find / replace -------------------------------------------------------
+  /** Opens the CodeMirror search panel and focuses the given field. */
+  const focusSearchField = useCallback((which: "find" | "replace") => {
+    const view = editorViewRef.current;
+    if (!view) return;
+    view.focus();
+    openSearchPanel(view);
+    requestAnimationFrame(() => {
+      const input = view.dom.querySelector<HTMLInputElement>(`.cm-search input[name="${which}"]`);
+      if (input) {
+        input.focus();
+        input.select();
+      }
+    });
+  }, []);
+
+  const onFind = useCallback(() => focusSearchField("find"), [focusSearchField]);
+  const onReplace = useCallback(() => focusSearchField("replace"), [focusSearchField]);
+
+  /** 全部替换：先统计匹配数弹确认（替换会改动文档且不可轻易撤销），再执行。 */
+  const requestReplaceAll = useCallback(() => {
+    const view = editorViewRef.current;
+    if (!view) return;
+    view.focus();
+    openSearchPanel(view); // ensures the search extension/state is installed
+    const query = getSearchQuery(view.state);
+    if (!query || !query.search || !query.valid) {
+      setNotice("请先在查找框中输入要替换的内容。");
+      return;
+    }
+    const count = countQueryMatches(view.state, query);
+    if (count === 0) {
+      setNotice("没有找到匹配内容。");
+      return;
+    }
+    setReplaceConfirmCount(count);
+  }, []);
+
+  const confirmReplaceAll = useCallback(() => {
+    const n = replaceConfirmCount;
+    setReplaceConfirmCount(null);
+    const view = editorViewRef.current;
+    if (!view) return;
+    replaceAll(view);
+    setNotice(`已全部替换 ${n} 处。`);
+  }, [replaceConfirmCount]);
+
+  // The CodeMirror panel's built-in "全部替换" button performs an immediate
+  // replace-all; intercept it (capture phase, before CM's own handler) so it
+  // goes through the same count + confirm flow as the menu item.
+  useEffect(() => {
+    const onDocClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement | null;
+      const btn = target?.closest<HTMLElement>('button[name="replaceAll"]');
+      const view = editorViewRef.current;
+      if (btn && view && view.dom.contains(btn)) {
+        e.preventDefault();
+        e.stopPropagation();
+        requestReplaceAll();
+      }
+    };
+    document.addEventListener("click", onDocClick, true);
+    return () => document.removeEventListener("click", onDocClick, true);
+  }, [requestReplaceAll]);
+
   // ---- shortcuts ------------------------------------------------------------
   const cycleLayout = useCallback(() => {
     setSettings((prev) => {
@@ -602,7 +705,7 @@ export default function App() {
       const k = e.key.toLowerCase();
       // While a modal is open, editor/app shortcuts must not fire on the tab
       // underneath it (e.g. Ctrl+W closing a tab below the settings dialog).
-      if (showSettings || infoDialog || confirmClose) return;
+      if (showSettings || infoDialog || confirmClose || replaceConfirmCount != null) return;
       if (mod && k === "s") {
         e.preventDefault();
         if (e.shiftKey) void onSaveAs();
@@ -622,6 +725,20 @@ export default function App() {
       } else if (mod && k === "p") {
         e.preventDefault();
         if (activeIsMarkdown) onPreview();
+      } else if (mod && k === "f") {
+        // Ctrl+F: open the search panel. Inside the editor (or its panel) the
+        // CodeMirror keymap already handles it - only route when focus is
+        // elsewhere (menu/status bar) so the shortcut works app-wide.
+        const view = editorViewRef.current;
+        const active = tabsRef.current.activeId
+          ? store.getTab(tabsRef.current, tabsRef.current.activeId)
+          : undefined;
+        const ae = document.activeElement as HTMLElement | null;
+        const focusInsideCm = !!view && !!ae && (view.dom.contains(ae) || !!ae.closest(".cm-search"));
+        if (view && active && isEditor(active) && !focusInsideCm) {
+          e.preventDefault();
+          onFind();
+        }
       } else if (e.key === "F5") {
         e.preventDefault();
         cycleLayout();
@@ -638,9 +755,11 @@ export default function App() {
     cycleLayout,
     activeIsMarkdown,
     onPreview,
+    onFind,
     showSettings,
     infoDialog,
     confirmClose,
+    replaceConfirmCount,
   ]);
 
   // ---- language override -------------------------------------------------------
@@ -911,6 +1030,10 @@ export default function App() {
           { type: "item", label: "粘贴", shortcut: "Ctrl+V", disabled: !hasMountedEditor, onAction: () => runEditorCommand("paste") },
           { type: "item", label: "全选", shortcut: "Ctrl+A", disabled: !hasMountedEditor, onAction: () => runEditorCommand("selectAll") },
           { type: "sep" },
+          { type: "item", label: "查找…", shortcut: "Ctrl+F", disabled: !hasMountedEditor, onAction: onFind },
+          { type: "item", label: "替换…", disabled: !hasMountedEditor, onAction: onReplace },
+          { type: "item", label: "全部替换…", disabled: !hasMountedEditor, onAction: requestReplaceAll },
+          { type: "sep" },
           { type: "item", label: "设置…", shortcut: "Ctrl+,", onAction: () => setShowSettings(true) },
         ],
       },
@@ -936,6 +1059,9 @@ export default function App() {
     openPathAsTab,
     requestQuit,
     runEditorCommand,
+    onFind,
+    onReplace,
+    requestReplaceAll,
     settings?.recentFiles,
   ]);
 
@@ -1124,6 +1250,25 @@ export default function App() {
           onDiscard={() => void resolveClose(false)}
           onCancel={() => setConfirmClose(null)}
         />
+      )}
+
+      {replaceConfirmCount != null && (
+        <Modal title="全部替换" width={420} onClose={() => setReplaceConfirmCount(null)}>
+          <div className="info-body">
+            <p>
+              将替换文档中 <b>{replaceConfirmCount}</b> 处匹配内容（替换后可用
+              Ctrl+Z 撤销），是否继续？
+            </p>
+          </div>
+          <div className="modal-foot">
+            <button className="btn primary" onClick={() => void confirmReplaceAll()}>
+              全部替换
+            </button>
+            <button className="btn" onClick={() => setReplaceConfirmCount(null)}>
+              取消
+            </button>
+          </div>
+        </Modal>
       )}
     </div>
   );

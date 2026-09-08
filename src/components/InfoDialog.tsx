@@ -12,6 +12,7 @@ const CONTENT: Record<InfoKind, { title: string; body: React.ReactNode }> = {
           <li><b>新建标签</b> Ctrl+N　·　<b>打开文件</b> Ctrl+O</li>
           <li><b>保存</b> Ctrl+S　·　<b>另存为</b> Ctrl+Shift+S</li>
           <li><b>关闭标签</b> Ctrl+W　·　<b>切换布局</b> F5</li>
+          <li><b>查找 / 替换</b> Ctrl+F 打开面板（含替换栏）；Enter 下一个、Shift+Enter 上一个；“全部替换”前会确认数量</li>
           <li><b>打开设置</b> Ctrl+,</li>
         </ul>
         <h3>自动保存（快照模式）</h3>
