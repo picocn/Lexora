@@ -14,6 +14,7 @@ export interface ThemePalette {
   tabBg: string;
   accent: string;
   panelBg: string;
+  statusBg: string;
   dark: boolean;
 }
 
@@ -97,6 +98,7 @@ const lightPalette: ThemePalette = {
   tabBg: "#eaeef2",
   accent: "#0969da",
   panelBg: "#f6f8fa",
+  statusBg: "#eaeef2",
   dark: false,
 };
 
@@ -109,6 +111,7 @@ const darkPalette: ThemePalette = {
   tabBg: "#010409",
   accent: "#58a6ff",
   panelBg: "#161b22",
+  statusBg: "#161b22",
   dark: true,
 };
 
@@ -195,6 +198,12 @@ export function themeFromVscode(parsed: ParsedVscodeTheme): ResolvedTheme {
     tabBg: parsed.dark ? "#1e1e1e" : "#e7e7e7",
     accent: parsed.dark ? "#4fc1ff" : "#0066bf",
     panelBg: parsed.dark ? "#252526" : "#f3f3f3",
+    // 导入主题的状态栏：优先用主题自带的 statusBar.background；缺失时用与明暗
+    // 匹配的中性色，绝不再硬编码成 VS Code 蓝（#007acc）。
+    statusBg: hexOr(
+      colors["statusBar.background"],
+      parsed.dark ? "#2d2d2d" : "#e7e7e7",
+    ),
     dark: parsed.dark,
   };
 

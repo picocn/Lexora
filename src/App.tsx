@@ -184,6 +184,28 @@ export default function App() {
   /** Pending "全部替换" confirmation: number of matches that would change. */
   const [replaceConfirmCount, setReplaceConfirmCount] = useState<number | null>(null);
 
+  /** Notices with autoHideMs > 0 dismiss themselves after that time, but only
+   * when the currently shown notice is still the same text (a later notice of
+   * a different text is never cleared by an expired timer). */
+  const noticeTimerRef = useRef<number | null>(null);
+  const showNotice = useCallback((text: string, autoHideMs = 0) => {
+    if (noticeTimerRef.current != null) window.clearTimeout(noticeTimerRef.current);
+    noticeTimerRef.current = null;
+    setNotice(text);
+    if (autoHideMs > 0) {
+      noticeTimerRef.current = window.setTimeout(() => {
+        noticeTimerRef.current = null;
+        setNotice((cur) => (cur === text ? null : cur));
+      }, autoHideMs);
+    }
+  }, []);
+  useEffect(
+    () => () => {
+      if (noticeTimerRef.current != null) window.clearTimeout(noticeTimerRef.current);
+    },
+    [],
+  );
+
   const tabsRef = useRef(tabsState);
   tabsRef.current = tabsState;
   const editorViewRef = useRef<EditorView | null>(null);
@@ -261,8 +283,10 @@ export default function App() {
     }
   }, [collectSession]);
 
-  // Window close interception: ask when dirty editor tabs exist. Every close
-  // request first persists the session, then either quits (clean) or prompts.
+  // Window close handling: quitting never asks to save. Every close request
+  // persists the session, writes a fresh recovery snapshot for every unsaved
+  // (dirty) tab, drops stale snapshots of clean tabs, then exits - so nothing
+  // is lost and the next launch restores unsaved documents automatically.
   useEffect(() => {
     let unlisten: (() => void) | null = null;
     let cancelled = false;
@@ -271,15 +295,11 @@ export default function App() {
       try {
         const win = getCurrentWindow();
         const un = await win.onCloseRequested(async (event) => {
-          if (allowCloseRef.current) return; // confirmed quit: let it close
-          event.preventDefault(); // decide explicitly below
+          if (allowCloseRef.current) return; // already exiting: let it close
+          event.preventDefault(); // we decide everything below
           await saveSessionNow();
-          const dirty = tabsRef.current.tabs.some((t) => isEditor(t) && tabDirty(t));
-          if (dirty) {
-            setConfirmClose({ quit: true });
-          } else {
-            await forceQuit();
-          }
+          await syncSnapshotsForExit();
+          await forceQuit();
         });
         if (cancelled) un();
         else unlisten = un;
@@ -294,8 +314,7 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /** Actually closes the window / exits the app. Called only after the user
-   * confirmed the quit dialog (or no dirty tab existed). Prefers the Rust
+  /** Actually closes the window / exits the app. Prefers the Rust
    * exit_app command (guaranteed process exit), then destroy(), then close(). */
   const forceQuit = useCallback(async () => {
     await saveSessionNow();
@@ -551,23 +570,7 @@ export default function App() {
       const c = confirmClose;
       if (!c) return;
       setConfirmClose(null);
-
-      if (c.quit) {
-        // ---- quitting the whole app ----
-        if (saveFirst) {
-          // 保存并退出：逐个写入原文件，全部成功后真正关闭。
-          const dirty = tabsRef.current.tabs.filter((t) => isEditor(t) && tabDirty(t));
-          for (const tab of dirty) {
-            const ok = await saveTabById(tab.model.id, false);
-            if (!ok) return; // 用户取消保存对话框或写入失败：中止退出
-          }
-        } else {
-          // 不保存退出：快照保留，同步为当前未保存状态后退出。
-          await syncSnapshotsForExit();
-        }
-        await forceQuit();
-        return;
-      }
+      if (c.quit) return; // quit never prompts anymore (see close handler)
 
       // ---- closing one tab ----
       const id = c.tabId;
@@ -581,7 +584,7 @@ export default function App() {
         await doDiscardAndClose([id]);
       }
     },
-    [confirmClose, saveTabById, doDiscardAndClose, syncSnapshotsForExit, forceQuit],
+    [confirmClose, saveTabById, doDiscardAndClose],
   );
 
   // ---- doc change routing -----------------------------------------------------
@@ -975,7 +978,10 @@ export default function App() {
             }
           }
           if (!cancelled) {
-            setNotice(`已从上次会话自动恢复 ${items.length} 个未保存文档（仍为未保存状态）`);
+            showNotice(
+              `已从上次会话自动恢复 ${items.length} 个未保存文档（仍为未保存状态）`,
+              5000,
+            );
           }
         }
       } catch {
@@ -1126,6 +1132,7 @@ export default function App() {
     "--tab-active-bg": palette.tabActiveBg,
     "--accent": palette.accent,
     "--panel-bg": palette.panelBg,
+    "--status-bg": palette.statusBg,
   } as CSSProperties;
 
   // Content shown by a preview tab = its source editor text.
@@ -1151,7 +1158,6 @@ export default function App() {
   const previewFontFamily = settings?.preview.fontFamily ?? "system-ui, sans-serif";
   const previewFontSize = settings?.preview.fontSize ?? 15;
 
-  const dirtyCount = tabsState.tabs.filter((t) => isEditor(t) && tabDirty(t)).length;
   const activeLanguage = activeTab
     ? isPreview(activeTab)
       ? "Markdown 预览"
@@ -1323,15 +1329,11 @@ export default function App() {
 
       {infoDialog && <InfoDialog kind={infoDialog} onClose={() => setInfoDialog(null)} />}
 
-      {confirmClose && (
+      {confirmClose && !confirmClose.quit && (
         <CloseConfirm
-          kind={confirmClose.quit ? "quit" : "close-tab"}
-          count={dirtyCount}
-          titles={
-            confirmClose.quit
-              ? tabsState.tabs.filter((t) => isEditor(t) && tabDirty(t)).map((t) => t.model.title)
-              : [store.getTab(tabsState, confirmClose.tabId!)?.model.title ?? "当前文件"]
-          }
+          kind="close-tab"
+          count={1}
+          titles={[store.getTab(tabsState, confirmClose.tabId!)?.model.title ?? "当前文件"]}
           onSave={() => void resolveClose(true)}
           onDiscard={() => void resolveClose(false)}
           onCancel={() => setConfirmClose(null)}
