@@ -1,11 +1,17 @@
 import MarkdownIt from "markdown-it";
 import hljs from "highlight.js/lib/common";
+import katex from "katex";
+import texmath from "markdown-it-texmath";
 
 export const md: MarkdownIt = new MarkdownIt({
   html: false, // security: never render raw HTML from the edited document
   linkify: true,
   breaks: false,
   highlight(code: string, lang: string): string {
+    if (lang === "mermaid") {
+      // Mermaid diagrams are rendered client-side after the preview mounts.
+      return `<pre class="mermaid">${md.utils.escapeHtml(code)}</pre>`;
+    }
     if (lang && hljs.getLanguage(lang)) {
       try {
         return `<pre class="hljs"><code>${hljs.highlight(code, { language: lang }).value}</code></pre>`;
@@ -15,6 +21,13 @@ export const md: MarkdownIt = new MarkdownIt({
     }
     return `<pre class="hljs"><code>${md.utils.escapeHtml(code)}</code></pre>`;
   },
+});
+
+// LaTeX math: $...$ inline, $$...$$ display, \(...\)/\[...\] and begin{} envs.
+md.use(texmath, {
+  engine: katex,
+  delimiters: "dollars",
+  katexOptions: { throwOnError: false, output: "html" },
 });
 
 md.enable(["table", "strikethrough"]);

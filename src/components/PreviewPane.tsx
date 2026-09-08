@@ -7,6 +7,8 @@ import {
   type CSSProperties,
 } from "react";
 import { renderMarkdown } from "../preview/render";
+import { renderMermaidIn } from "../preview/mermaid";
+import { dirnameOf, inTauri, resolveLocalImageSrc } from "../preview/imagePath";
 
 export interface PreviewPaneHandle {
   /** Scroll the preview so the markdown source line appears near the top. */
@@ -20,6 +22,8 @@ export interface PreviewPaneProps {
   /** Chroma variables (bg/fg/...). */
   vars: CSSProperties;
   debounceMs?: number;
+  /** Path of the document being previewed (used to resolve relative images). */
+  basePath?: string | null;
   /** Called with the markdown line at the preview viewport top while scrolling. */
   onPreviewScroll?: (line: number) => void;
 }
@@ -29,7 +33,7 @@ export interface PreviewPaneProps {
  * split-view scroll sync. */
 export const PreviewPane = forwardRef<PreviewPaneHandle, PreviewPaneProps>(
   function PreviewPane(
-    { text, fontFamily, fontSize, vars, debounceMs = 300, onPreviewScroll },
+    { text, fontFamily, fontSize, vars, debounceMs = 300, basePath, onPreviewScroll },
     ref,
   ) {
     const [html, setHtml] = useState(() => renderMarkdown(text));
@@ -48,6 +52,23 @@ export const PreviewPane = forwardRef<PreviewPaneHandle, PreviewPaneProps>(
         if (timer.current) window.clearTimeout(timer.current);
       };
     }, [text, debounceMs]);
+
+    // After every HTML refresh: render mermaid diagrams and fix up local image
+    // srcs (relative paths are resolved against the document's folder, then
+    // converted to the Tauri asset protocol URL).
+    const postProcessTimer = useRef<number | null>(null);
+    useEffect(() => {
+      const el = scrollRef.current;
+      if (!el) return;
+      if (postProcessTimer.current) window.clearTimeout(postProcessTimer.current);
+      postProcessTimer.current = window.setTimeout(() => {
+        void renderMermaidIn(el);
+        void fixupImages(el, basePath ?? null);
+      }, 0);
+      return () => {
+        if (postProcessTimer.current) window.clearTimeout(postProcessTimer.current);
+      };
+    }, [html, basePath]);
 
     // Report the source line near the top of the preview viewport while
     // the user scrolls (throttled via rAF).
@@ -144,4 +165,35 @@ function offsetTopIn(container: HTMLElement, child: HTMLElement): number {
   const cRect = container.getBoundingClientRect();
   const eRect = child.getBoundingClientRect();
   return eRect.top - cRect.top + container.scrollTop;
+}
+
+/**
+ * Rewrites <img src> of local files so the webview can load them.
+ * - http(s)/data URLs are left untouched.
+ * - Relative paths are resolved against the document directory.
+ * - Under Tauri the absolute local path is converted to the asset protocol.
+ */
+async function fixupImages(container: HTMLElement, basePath: string | null): Promise<void> {
+  if (!basePath) return; // nothing to resolve without a document path
+  const baseDir = dirnameOf(basePath);
+  const imgs = Array.from(container.querySelectorAll<HTMLImageElement>("img"));
+  if (!imgs.length) return;
+
+  const { convertFileSrc } = await import("@tauri-apps/api/core").catch(() => ({ convertFileSrc: null as null }));
+  for (const img of imgs) {
+    const src = img.getAttribute("src");
+    if (!src) continue;
+    const local = resolveLocalImageSrc(src, baseDir);
+    if (!local) continue; // remote/data/asset URLs render natively
+    if (inTauri() && convertFileSrc) {
+      img.src = convertFileSrc(local);
+      img.onerror = () => {
+        img.onerror = null;
+        img.setAttribute("title", `无法加载图片：${src}`);
+      };
+    } else {
+      // Browser preview: point at the plain local path.
+      img.src = local.replace(/\\/g, "/");
+    }
+  }
 }

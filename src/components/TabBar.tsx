@@ -39,7 +39,7 @@ export function TabBar(p: TabBarProps) {
             </button>
           </div>
         ))}
-        {p.tabs.length === 0 && <span className="tabbar-empty">mdpad</span>}
+        {p.tabs.length === 0 && <span className="tabbar-empty">Lexora</span>}
       </div>
       <div className="tabbar-actions">
         {p.canPreview && (

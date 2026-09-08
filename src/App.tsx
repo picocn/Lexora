@@ -44,7 +44,7 @@ import { CloseConfirm } from "./components/CloseConfirm";
 import { InfoDialog, type InfoKind } from "./components/InfoDialog";
 import { viewTabs } from "./components/appState";
 
-const THEME_STORAGE_KEY = "mdpad.vscodeThemes.v1";
+const THEME_STORAGE_KEY = "lexora.vscodeThemes.v1";
 type StoredThemeMap = Record<string, unknown>;
 
 function loadStoredThemes(): StoredThemeMap {
@@ -894,6 +894,16 @@ export default function App() {
     return tabText(activeTab);
   }, [activeTab, tabsState]);
 
+  /** Path of the markdown document being previewed (for relative images). */
+  const previewBasePath = useMemo(() => {
+    if (!activeTab) return null;
+    if (isPreview(activeTab)) {
+      const source = activeTab.model.sourceTabId ? store.getTab(tabsState, activeTab.model.sourceTabId) : undefined;
+      return source?.model.path ?? null;
+    }
+    return activeTab.model.path;
+  }, [activeTab, tabsState]);
+
   const previewFontFamily = settings?.preview.fontFamily ?? "system-ui, sans-serif";
   const previewFontSize = settings?.preview.fontSize ?? 15;
 
@@ -911,7 +921,7 @@ export default function App() {
     workbench = (
       <div className="editor-pane">
         <div className="empty-hint">
-          <div>欢迎使用 mdpad</div>
+          <div>欢迎使用 Lexora</div>
           <div className="empty-sub">Ctrl+O 打开文件 · Ctrl+N 新建 · 编辑 Markdown 可预览</div>
         </div>
       </div>
@@ -922,6 +932,7 @@ export default function App() {
       <div className="preview-full">
         <PreviewPane
           text={previewText}
+          basePath={previewBasePath}
           fontFamily={previewFontFamily}
           fontSize={previewFontSize}
           vars={cssVars}
@@ -934,6 +945,7 @@ export default function App() {
       <div className="preview-pane-wrap">
         <PreviewPane
           text={previewText}
+          basePath={previewBasePath}
           fontFamily={previewFontFamily}
           fontSize={previewFontSize}
           vars={cssVars}
@@ -956,6 +968,7 @@ export default function App() {
           <PreviewPane
             ref={previewHandleRef}
             text={previewText}
+            basePath={previewBasePath}
             fontFamily={previewFontFamily}
             fontSize={previewFontSize}
             vars={cssVars}

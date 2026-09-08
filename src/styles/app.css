@@ -524,10 +524,40 @@ body {
   margin: 1.6em 0;
 }
 
+/* preview images */
+.preview-pane img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 6px;
+  margin: 0.6em 0;
+}
+
 /* highlight.js default overrides to follow theme foreground */
 .preview-pane .hljs {
   background: transparent;
   color: inherit;
+}
+
+/* mermaid diagrams */
+.preview-pane pre.mermaid {
+  background: transparent;
+  border: none;
+  padding: 8px 0;
+  text-align: center;
+  overflow-x: auto;
+}
+
+.preview-pane pre.mermaid svg {
+  max-width: 100%;
+  height: auto;
+}
+
+/* KaTeX display blocks */
+.preview-pane .katex-display {
+  margin: 0.8em 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 2px 0;
 }
 
 /* ---------- status bar ---------- */

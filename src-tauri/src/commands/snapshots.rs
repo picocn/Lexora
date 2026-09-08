@@ -245,7 +245,7 @@ mod tests {
     #[test]
     fn resolve_stem_matches_list_key_and_raw_dockey() {
         // Simulate: write uses sanitize(rawDocKey); list returns that stem.
-        let dir = std::env::temp_dir().join("mdpad-snap-test");
+        let dir = std::env::temp_dir().join("lexora-snap-test");
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
 

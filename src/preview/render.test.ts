@@ -48,4 +48,19 @@ describe("markdown 预览渲染", () => {
     const html = renderMarkdown("```\n<a href=x>raw</a>\n```");
     expect(html).toContain("&lt;a");
   });
+
+  it("renders LaTeX math (inline and display)", () => {
+    const inline = renderMarkdown("欧拉公式 $e^{i\\pi}+1=0$ 很美");
+    expect(inline).toContain("katex");
+    const display = renderMarkdown("$$\n\\int_0^1 x\\,dx\n$$");
+    expect(display).toContain("katex-display");
+  });
+
+  it("emits mermaid fences without hljs markup", () => {
+    const html = renderMarkdown(
+      "```mermaid\ngraph TD\n  A-->B\n```",
+    );
+    expect(html).toContain('class="mermaid"');
+    expect(html).not.toContain("hljs");
+  });
 });

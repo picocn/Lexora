@@ -46,10 +46,10 @@ const CONTENT: Record<InfoKind, { title: string; body: React.ReactNode }> = {
     ),
   },
   about: {
-    title: "关于 mdpad",
+    title: "关于 Lexora",
     body: (
       <div className="info-body">
-        <p><b>mdpad</b> v{__APP_VERSION__}</p>
+        <p><b>Lexora</b> v{__APP_VERSION__}</p>
         <p>轻量级 Markdown 多标签编辑器。</p>
         <p>技术栈：Rust · Tauri 2 · React · CodeMirror 6</p>
       </div>
