@@ -24,6 +24,7 @@ pub fn run() {
             commands::files::read_text_file,
             commands::files::write_text_file,
             commands::files::path_exists,
+            commands::files::read_image_base64,
             commands::snapshots::snapshot_write,
             commands::snapshots::snapshot_list,
             commands::snapshots::snapshot_remove,

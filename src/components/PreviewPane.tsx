@@ -8,7 +8,8 @@ import {
 } from "react";
 import { renderMarkdown } from "../preview/render";
 import { renderMermaidIn } from "../preview/mermaid";
-import { dirnameOf, inTauri, resolveLocalImageSrc } from "../preview/imagePath";
+import { dirnameOf, resolveLocalImageSrc } from "../preview/imagePath";
+import { readImageBase64 } from "../ipc/commands";
 
 export interface PreviewPaneHandle {
   /** Scroll the preview so the markdown source line appears near the top. */
@@ -171,7 +172,9 @@ function offsetTopIn(container: HTMLElement, child: HTMLElement): number {
  * Rewrites <img src> of local files so the webview can load them.
  * - http(s)/data URLs are left untouched.
  * - Relative paths are resolved against the document directory.
- * - Under Tauri the absolute local path is converted to the asset protocol.
+ * - Local files are read through the Rust command into a base64 data URL
+ *   (robust for CJK / space / any-character paths - the asset protocol and
+ *   percent-encoding are deliberately not used here).
  */
 async function fixupImages(container: HTMLElement, basePath: string | null): Promise<void> {
   if (!basePath) return; // nothing to resolve without a document path
@@ -179,21 +182,41 @@ async function fixupImages(container: HTMLElement, basePath: string | null): Pro
   const imgs = Array.from(container.querySelectorAll<HTMLImageElement>("img"));
   if (!imgs.length) return;
 
-  const { convertFileSrc } = await import("@tauri-apps/api/core").catch(() => ({ convertFileSrc: null as null }));
   for (const img of imgs) {
     const src = img.getAttribute("src");
     if (!src) continue;
     const local = resolveLocalImageSrc(src, baseDir);
-    if (!local) continue; // remote/data/asset URLs render natively
-    if (inTauri() && convertFileSrc) {
-      img.src = convertFileSrc(local);
+    if (!local) continue; // remote/data URLs render natively
+    if (local.startsWith("data:")) continue;
+    try {
+      const mime = mimeOfPath(local);
+      const b64 = await readImageBase64(local);
+      img.src = `data:${mime};base64,${b64}`;
       img.onerror = () => {
         img.onerror = null;
         img.setAttribute("title", `无法加载图片：${src}`);
       };
-    } else {
-      // Browser preview: point at the plain local path.
-      img.src = local.replace(/\\/g, "/");
+    } catch {
+      img.setAttribute("title", `无法加载图片：${src}`);
+      img.setAttribute("alt", `[无法加载图片：${src}]`);
     }
   }
+}
+
+const MIME_BY_EXT: Record<string, string> = {
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  gif: "image/gif",
+  webp: "image/webp",
+  bmp: "image/bmp",
+  svg: "image/svg+xml",
+  ico: "image/x-icon",
+  avif: "image/avif",
+};
+
+function mimeOfPath(p: string): string {
+  const i = p.lastIndexOf(".");
+  const ext = i >= 0 ? p.slice(i + 1).toLowerCase() : "";
+  return MIME_BY_EXT[ext] ?? "application/octet-stream";
 }

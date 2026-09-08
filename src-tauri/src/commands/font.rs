@@ -105,7 +105,7 @@ pub fn pick_system_font(
 
 fn run_dialog(initial_family: &str, size_pt: f64) -> Option<FontPick> {
     // Create a message queue on this thread before showing the modal dialog.
-    let mut msg: winapi_mini::MSG = unsafe { mem::zeroed() };
+    let mut msg: winapi_mini::Msg = unsafe { mem::zeroed() };
     unsafe {
         winapi_mini::PeekMessageW(&mut msg, 0, 0, 0, 0);
     }
@@ -148,9 +148,10 @@ fn run_dialog(initial_family: &str, size_pt: f64) -> Option<FontPick> {
 
 /// Minimal MSG + PeekMessage wrapper used only to seed a message queue on the
 /// dialog thread (ChooseFontW needs a queue to run its modal loop).
+#[allow(clippy::upper_case_acronyms)]
 mod winapi_mini {
     #[repr(C)]
-    pub struct MSG {
+    pub struct Msg {
         pub hwnd: usize,
         pub message: u32,
         pub w_param: usize,
@@ -163,7 +164,7 @@ mod winapi_mini {
     #[link(name = "user32")]
     unsafe extern "system" {
         pub fn PeekMessageW(
-            lp_msg: *mut MSG,
+            lp_msg: *mut Msg,
             h_wnd: usize,
             w_msg_filter_min: u32,
             w_msg_filter_max: u32,

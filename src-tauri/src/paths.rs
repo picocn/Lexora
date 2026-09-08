@@ -14,7 +14,6 @@ use tauri::Manager;
 ///
 /// Writability is probed once per process and cached, so per-snapshot writes
 /// never pay the probe cost again.
-
 enum DirKind {
     Settings,
     Autosave,

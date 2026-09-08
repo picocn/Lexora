@@ -91,6 +91,11 @@ export function pathExists(path: string): Promise<boolean> {
   return invoke<boolean>("path_exists", { path });
 }
 
+/** Reads a local image file into a base64 payload (data URL body). */
+export function readImageBase64(path: string): Promise<string> {
+  return invoke<string>("read_image_base64", { path });
+}
+
 export async function snapshotWrite(
   docKey: string,
   content: string,
