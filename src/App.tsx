@@ -1332,6 +1332,7 @@ export default function App() {
         onActivate={onActivate}
         onClose={requestCloseTab}
         onPreview={onPreview}
+        onNewTab={onNew}
       />
       <div className="workbench">{workbench}</div>
       <StatusBar

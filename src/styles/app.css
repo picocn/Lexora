@@ -1034,3 +1034,61 @@ body {
   color: var(--fg);
   opacity: 0.92;
 }
+
+/* ---------- tab bar: arrows + new-tab, no visible scrollbar ---------- */
+.tabbar-nav {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 6px 0 8px;
+  flex: 0 0 auto;
+}
+.tab-arrow {
+  border: none;
+  background: transparent;
+  color: var(--fg);
+  font-size: 18px;
+  line-height: 1;
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  cursor: pointer;
+  opacity: 0.85;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.tab-arrow:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--fg, #333) 10%, transparent);
+}
+.tab-arrow:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+.tabbar-scroll {
+  scrollbar-width: none; /* Firefox */
+}
+.tabbar-scroll::-webkit-scrollbar {
+  display: none; /* Chrome/Edge: no scrollbar, arrows + reveal handle overflow */
+}
+.tabbar-scroll .tab {
+  flex-shrink: 0;
+}
+.tab-new {
+  border: 1px solid var(--border-soft);
+  background: color-mix(in srgb, var(--fg, #333) 4%, transparent);
+  color: var(--fg);
+  border-radius: 6px;
+  font-size: 16px;
+  line-height: 1;
+  width: 28px;
+  height: 28px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.tab-new:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
