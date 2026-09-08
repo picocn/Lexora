@@ -930,3 +930,69 @@ body {
 .btn.danger:hover {
   border-color: #ff6b6b;
 }
+
+/* ---------- custom title bar (decorations off): icon + menus on one row ---------- */
+.title-row {
+  display: flex;
+  align-items: stretch;
+  flex: 0 0 auto;
+  height: 36px;
+  background: var(--panel-bg);
+  border-bottom: 1px solid var(--border-soft);
+  user-select: none;
+}
+.title-brand {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 10px 0 9px;
+  cursor: default;
+}
+.title-icon {
+  width: 18px;
+  height: 18px;
+  pointer-events: none;
+}
+.title-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg);
+  letter-spacing: 0.2px;
+}
+.title-menus {
+  display: flex;
+  align-items: center;
+}
+.title-menus .menubar {
+  background: transparent;
+  border-bottom: none;
+  min-height: auto;
+  height: 100%;
+  padding: 0;
+}
+.title-spacer {
+  flex: 1 1 auto;
+}
+.title-controls {
+  display: flex;
+  align-items: stretch;
+}
+.title-btn {
+  border: none;
+  background: transparent;
+  color: var(--fg);
+  width: 44px;
+  font-size: 13px;
+  cursor: default;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0;
+}
+.title-btn:hover {
+  background: color-mix(in srgb, var(--fg, #333) 10%, transparent);
+}
+.title-close:hover {
+  background: #d1242f;
+  color: #fff;
+}

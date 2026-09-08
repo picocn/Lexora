@@ -1,4 +1,13 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type MouseEvent as ReactMouseEvent,
+  type ReactNode,
+} from "react";
 import type { EditorState, Extension } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { undo, redo, selectAll } from "@codemirror/commands";
@@ -136,6 +145,30 @@ function countQueryMatches(state: EditorState, query: SearchQuery): number {
   } catch {
     return 0; // invalid regexp (query.valid should already have guarded)
   }
+}
+
+/** Tauri main-window helper (browser preview resolves to nothing). */
+async function withMainWindow<T>(fn: (w: import("@tauri-apps/api/window").Window) => Promise<T>): Promise<T | undefined> {
+  try {
+    const { getCurrentWindow } = await import("@tauri-apps/api/window");
+    return await fn(getCurrentWindow());
+  } catch {
+    return undefined; // running outside Tauri
+  }
+}
+
+/** Starts a native window drag (custom title bar, decorations off). */
+function startWindowDrag(e: ReactMouseEvent): void {
+  if (e.button !== 0) return;
+  void withMainWindow((w) => w.startDragging());
+}
+
+function toggleWindowMaximized(): void {
+  void withMainWindow((w) => w.toggleMaximize());
+}
+
+function minimizeWindow(): void {
+  void withMainWindow((w) => w.minimize());
 }
 
 export default function App() {
@@ -1199,7 +1232,42 @@ export default function App() {
 
   return (
     <div className="app-root" style={cssVars}>
-      <MenuBar groups={menuGroups} />
+      <div className="title-row">
+        <div
+          className="title-brand"
+          onMouseDown={startWindowDrag}
+          onDoubleClick={toggleWindowMaximized}
+          title="双击最大化/还原"
+        >
+          <img className="title-icon" src="icons/32x32.png" alt="" draggable={false} />
+          <span className="title-name">Lexora</span>
+        </div>
+        <div className="title-menus">
+          <MenuBar groups={menuGroups} />
+        </div>
+        <div className="title-spacer" onMouseDown={startWindowDrag} onDoubleClick={toggleWindowMaximized} />
+        <div className="title-controls">
+          <button className="title-btn" aria-label="最小化" title="最小化" onClick={() => void minimizeWindow()}>
+            &#x2013;
+          </button>
+          <button
+            className="title-btn"
+            aria-label="最大化/还原"
+            title="最大化/还原"
+            onClick={() => void toggleWindowMaximized()}
+          >
+            &#x25A1;
+          </button>
+          <button
+            className="title-btn title-close"
+            aria-label="关闭"
+            title="关闭"
+            onClick={() => void requestQuit()}
+          >
+            &#x2715;
+          </button>
+        </div>
+      </div>
       <TabBar
         tabs={viewTabs(tabsState, (t) =>
           t.model.languageOverride ? labelOfOverride(t.model.languageOverride) : labelForName(t.model.title),
