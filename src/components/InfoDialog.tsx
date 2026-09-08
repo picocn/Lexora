@@ -33,7 +33,7 @@ const CONTENT: Record<InfoKind, { title: string; body: React.ReactNode }> = {
     title: "版本说明",
     body: (
       <div className="info-body">
-        <h3>v0.1.0</h3>
+        <h3>v{__APP_VERSION__}</h3>
         <ul>
           <li>CodeMirror 6 多标签编辑，按扩展名自动语法高亮（md/yml/toml/html/css/js/ts/json/rust/python 等），支持手动指定语言。</li>
           <li>定时自动保存仅写入恢复快照，原文件只由手动保存覆盖；启动提供快照恢复。</li>
@@ -49,7 +49,7 @@ const CONTENT: Record<InfoKind, { title: string; body: React.ReactNode }> = {
     title: "关于 mdpad",
     body: (
       <div className="info-body">
-        <p><b>mdpad</b> v0.1.0</p>
+        <p><b>mdpad</b> v{__APP_VERSION__}</p>
         <p>轻量级 Markdown 多标签编辑器。</p>
         <p>技术栈：Rust · Tauri 2 · React · CodeMirror 6</p>
       </div>
