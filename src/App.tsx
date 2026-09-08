@@ -832,6 +832,24 @@ export default function App() {
     });
   }, []);
 
+  /** Removes an imported VS Code theme. If it was the active theme, falls
+   * back to the built-in light theme and persists that switch. */
+  const deleteVscodeTheme = useCallback((id: string) => {
+    setImportedThemes((prev) => {
+      if (!(id in prev)) return prev;
+      const next = { ...prev };
+      delete next[id];
+      persistStoredThemes(next);
+      return next;
+    });
+    setSettings((prev) => {
+      if (!prev || !(prev.theme.kind === "vscode" && prev.theme.id === id)) return prev;
+      const next = { ...prev, theme: { kind: "builtin" as const, id: "light" as const } };
+      writeSettings(next).catch(() => {});
+      return next;
+    });
+  }, []);
+
   // ---- recovery handlers ------------------------------------------------------
   const restoreSnapshot = useCallback(
     async (key: string) => {
@@ -1230,6 +1248,7 @@ export default function App() {
           onSaveAndQuit={saveSettingsAndQuit}
           onCancel={() => setShowSettings(false)}
           onImportVscodeTheme={importVscodeTheme}
+          onDeleteVscodeTheme={deleteVscodeTheme}
           onPickEditorFont={(s) => pickFontFor(s, "editor")}
           onPickPreviewFont={(s) => pickFontFor(s, "preview")}
         />

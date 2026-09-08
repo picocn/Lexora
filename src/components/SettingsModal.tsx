@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { AppSettings } from "../ipc/commands";
 import { DEFAULT_SETTINGS } from "../ipc/commands";
 import { Modal } from "./Modal";
@@ -21,6 +21,8 @@ export interface SettingsModalProps {
   /** Discard changes and close the settings dialog. */
   onCancel: () => void;
   onImportVscodeTheme: () => Promise<void>;
+  /** Deletes an imported VS Code theme (id starts with "vscode:"). */
+  onDeleteVscodeTheme?: (id: string) => void;
   /** Opens the OS font dialog for the editor font. */
   onPickEditorFont: (current: AppSettings) => Promise<FontPickResult | null>;
   /** Opens the OS font dialog for the preview font. */
@@ -44,6 +46,7 @@ export function SettingsModal(p: SettingsModalProps) {
   );
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const vscodeChoices = p.themeChoices.filter((t) => t.id.startsWith("vscode:"));
 
   const set = <K extends keyof AppSettings>(key: K, val: AppSettings[K]) =>
     setDraft((d) => ({ ...d, [key]: val }));
@@ -238,6 +241,29 @@ export function SettingsModal(p: SettingsModalProps) {
           >
             导入 VS Code 主题 JSON…
           </button>
+          <div className="imported-themes">
+            <span className="hint">已导入（点击删除可移除；删除正在使用的主题将回退到内置浅色）</span>
+            {vscodeChoices.length === 0 ? (
+              <div className="imported-empty">暂无</div>
+            ) : (
+              vscodeChoices.map((c) => (
+                <ImportedThemeRow
+                  key={c.id}
+                  label={c.label.replace(/^VS Code：/, "")}
+                  active={draft.theme.kind === "vscode" && draft.theme.id === c.id}
+                  onDelete={() => {
+                    p.onDeleteVscodeTheme?.(c.id);
+                    setDraft((d) =>
+                      d.theme.kind === "vscode" && d.theme.id === c.id
+                        ? { ...d, theme: { kind: "builtin", id: "light" } }
+                        : d,
+                    );
+                    setErr(null);
+                  }}
+                />
+              ))
+            )}
+          </div>
           <label className="row">
             布局
             <select
@@ -262,5 +288,43 @@ export function SettingsModal(p: SettingsModalProps) {
       </div>
       <p className="modal-note">“保存并退出”将保存设置并关闭设置页，不会退出应用。</p>
     </Modal>
+  );
+}
+
+/** One imported-theme row with a two-step delete (first click arms, second
+ * click deletes; auto disarms after a few seconds). */
+function ImportedThemeRow(props: {
+  label: string;
+  active: boolean;
+  onDelete: () => void;
+}) {
+  const [armed, setArmed] = useState(false);
+  useEffect(() => {
+    if (!armed) return;
+    const t = window.setTimeout(() => setArmed(false), 4000);
+    return () => window.clearTimeout(t);
+  }, [armed]);
+
+  return (
+    <div className={`imported-row${props.active ? " active" : ""}`}>
+      <span className="imported-name" title={props.active ? "当前正在使用" : ""}>
+        {props.label}
+        {props.active && <em className="imported-using">（使用中）</em>}
+      </span>
+      {armed ? (
+        <span className="imported-actions">
+          <button className="btn danger small" onClick={() => { setArmed(false); props.onDelete(); }}>
+            确认删除
+          </button>
+          <button className="btn small" onClick={() => setArmed(false)}>
+            取消
+          </button>
+        </span>
+      ) : (
+        <button className="btn small" onClick={() => setArmed(true)}>
+          删除
+        </button>
+      )}
+    </div>
   );
 }

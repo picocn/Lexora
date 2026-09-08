@@ -875,3 +875,58 @@ body {
 ::-webkit-scrollbar-track {
   background: transparent;
 }
+
+/* imported VS Code theme management (settings) */
+.imported-themes {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 6px 0 10px;
+}
+.imported-empty {
+  font-size: 12px;
+  color: var(--muted);
+  padding: 2px 0;
+}
+.imported-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 6px;
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--fg, #333) 2%, transparent);
+}
+.imported-row.active {
+  border-color: var(--accent);
+}
+.imported-name {
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.imported-using {
+  font-style: normal;
+  color: var(--accent);
+  margin-left: 6px;
+  font-size: 11px;
+}
+.imported-actions {
+  display: inline-flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.btn.small {
+  padding: 2px 8px;
+  font-size: 11px;
+}
+.btn.danger {
+  background: #d1242f;
+  border-color: #d1242f;
+  color: #fff;
+}
+.btn.danger:hover {
+  border-color: #ff6b6b;
+}
