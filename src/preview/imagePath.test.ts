@@ -44,4 +44,24 @@ describe("image path resolution", () => {
     expect(resolveLocalImageSrc("img/a.png", null)).toBeNull();
     expect(resolveLocalImageSrc("  ", "D:\\docs")).toBeNull();
   });
+
+  it("percent-decodes markdown-it encoded srcs before resolving", () => {
+    const base = "D:\\诗词";
+    expect(
+      resolveLocalImageSrc(
+        "visual/%E7%99%BD%E5%B1%85%E6%98%93%E4%BC%A0-%E6%8F%92%E5%9B%BE/%E5%94%90%E9%A3%8E%E6%A7%90%E4%B8%8B%E5%AF%B9%E9%A5%AE%E6%B0%B4%E5%A2%A8%E7%94%BB.png",
+        base,
+      ),
+    ).toBe("D:\\诗词\\visual\\白居易传-插图\\唐风槐下对饮水墨画.png");
+    // %20 spaces and absolute Windows paths encoded with %5C backslashes
+    expect(resolveLocalImageSrc("img/a%20b.png", "D:\\docs")).toBe("D:\\docs\\img\\a b.png");
+    expect(resolveLocalImageSrc("D:%5Cdocs%5Cpic.png", "D:\\docs")).toBe("D:\\docs\\pic.png");
+    // remote URLs survive decoding and are still rejected
+    expect(resolveLocalImageSrc("https://x.com/a%20b.png", "D:\\docs")).toBeNull();
+  });
+
+  it("keeps malformed escape sequences instead of throwing", () => {
+    expect(resolveLocalImageSrc("img/100%25.png", "D:\\docs")).toBe("D:\\docs\\img\\100%.png");
+    expect(resolveLocalImageSrc("img/50%.png", "D:\\docs")).toBe("D:\\docs\\img\\50%.png");
+  });
 });

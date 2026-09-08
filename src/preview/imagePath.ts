@@ -55,7 +55,17 @@ export function joinPath(dir: string, child: string): string {
  * asset, file, fragment, protocol-relative).
  */
 export function resolveLocalImageSrc(src: string, baseDir: string | null): string | null {
-  const trimmed = src.trim();
+  let trimmed = src.trim();
+  if (!trimmed) return null;
+  // markdown-it (CommonMark normalizeLink) percent-encodes URI destinations,
+  // so CJK names become %E7%99%BD... and backslashes become %5C. Decode back
+  // to the raw filesystem reference before resolving (only %XX escapes are
+  // touched; raw unicode/spaces pass through untouched).
+  try {
+    trimmed = decodeURIComponent(trimmed);
+  } catch {
+    // malformed escape sequence (e.g. stray "%"): keep as-is
+  }
   if (!trimmed) return null;
   if (trimmed.startsWith("//")) return null; // protocol-relative (e.g. //cdn/x)
   if (isAbsolutePath(trimmed)) return normalizePath(trimmed);
