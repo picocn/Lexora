@@ -46,6 +46,7 @@ function freshTab(opts: {
   langExt: Extension | null;
   theme: Extension;
   prefs: EditorPrefs;
+  noHistory?: boolean;
 }): Tab {
   const { state, comps } = createEditorState({
     tabId: opts.model.id,
@@ -53,6 +54,7 @@ function freshTab(opts: {
     language: opts.langExt,
     theme: opts.theme,
     prefs: opts.prefs,
+    noHistory: opts.noHistory,
   });
   return {
     model: opts.model,
@@ -60,6 +62,73 @@ function freshTab(opts: {
     comps,
     langExt: opts.langExt,
     lastSnapshotContent: null,
+    unloaded: false,
+  };
+}
+
+/**
+ * Replaces a very large *clean* tab's heavy editor state with a lightweight
+ * placeholder (same tab id/model, empty doc). The tab stays visible; it is
+ * reloaded from disk when activated. `unloaded` keeps tabDirty() == false.
+ */
+export function unloadBigTab(
+  state: TabsState,
+  id: string,
+  opts: { theme: Extension; prefs: EditorPrefs },
+): TabsState {
+  return {
+    ...state,
+    tabs: state.tabs.map((t) => {
+      if (t.model.id !== id || !isEditor(t) || t.unloaded) return t;
+      const { state: cmState, comps } = createEditorState({
+        tabId: t.model.id,
+        doc: "",
+        theme: opts.theme,
+        prefs: opts.prefs,
+      });
+      return { ...t, cmState, comps, langExt: null, lastSnapshotContent: null, unloaded: true };
+    }),
+  };
+}
+
+/**
+ * Reloads an unloaded tab in place from freshly read file content, keeping
+ * the same tab id/order. Marks it loaded (unloaded = false).
+ */
+export function reloadBigTab(
+  state: TabsState,
+  id: string,
+  opts: {
+    path: string;
+    diskContent: string;
+    utf8Ok: boolean;
+    utf8Bom: boolean;
+    content: string;
+    langExt: Extension | null;
+    theme: Extension;
+    prefs: EditorPrefs;
+    noHistory?: boolean;
+  },
+): TabsState {
+  return {
+    ...state,
+    tabs: state.tabs.map((t) => {
+      if (t.model.id !== id) return t;
+      const fresh = freshTab({
+        model: {
+          ...t.model,
+          diskContent: opts.diskContent,
+          utf8Ok: opts.utf8Ok,
+          utf8Bom: opts.utf8Bom,
+        },
+        content: opts.content,
+        langExt: opts.langExt,
+        theme: opts.theme,
+        prefs: opts.prefs,
+        noHistory: opts.noHistory,
+      });
+      return { ...fresh, model: { ...fresh.model, id: t.model.id } };
+    }),
   };
 }
 
@@ -77,6 +146,10 @@ export function openFile(state: TabsState, opts: {
   langExt: Extension | null;
   theme: Extension;
   prefs: EditorPrefs;
+  /** focus the new tab (default true); false opens it in the background. */
+  focus?: boolean;
+  /** skip undo/redo history (very large documents). */
+  noHistory?: boolean;
 }): TabsState {
   const existing = findByPath(state, opts.path);
   if (existing) {
@@ -96,8 +169,16 @@ export function openFile(state: TabsState, opts: {
     utf8Bom: opts.utf8Bom ?? false,
     languageOverride: null,
   };
-  const tab = freshTab({ model, content: opts.content, langExt: opts.langExt, theme: opts.theme, prefs: opts.prefs });
-  return { tabs: [...state.tabs, tab], activeId: id, nextUntitled: state.nextUntitled };
+  const tab = freshTab({
+    model,
+    content: opts.content,
+    langExt: opts.langExt,
+    theme: opts.theme,
+    prefs: opts.prefs,
+    noHistory: opts.noHistory,
+  });
+  const activeId = opts.focus === false && state.activeId ? state.activeId : id;
+  return { tabs: [...state.tabs, tab], activeId, nextUntitled: state.nextUntitled };
 }
 
 /** Creates a new empty untitled tab (nothing on disk yet). */

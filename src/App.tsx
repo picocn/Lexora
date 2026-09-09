@@ -17,7 +17,7 @@ import {
   replaceAll,
   type SearchQuery,
 } from "@codemirror/search";
-import type { AppSettings } from "./ipc/commands";
+import type { AppSettings, FileReadResult } from "./ipc/commands";
 import {
   readSettings,
   writeSettings,
@@ -41,6 +41,12 @@ import type { TabsState, Tab } from "./tabs/types";
 import { tabDirty, tabText, isPreview, isEditor } from "./tabs/types";
 import * as store from "./tabs/store";
 import { runAutosaveTick } from "./tabs/autosave";
+import {
+  LARGE_FILE_WARN_BYTES,
+  UNLOAD_BIG_CHARS,
+  KEEP_LOADED_BIG,
+  SESSION_SKIP_BYTES,
+} from "./tabs/thresholds";
 import {
   languageForFile,
   languageForOverride,
@@ -185,6 +191,8 @@ export default function App() {
   const [cursorInfo, setCursorInfo] = useState<CursorInfo | null>(null);
   /** Pending "全部替换" confirmation: number of matches that would change. */
   const [replaceConfirmCount, setReplaceConfirmCount] = useState<number | null>(null);
+  /** L1: pending confirmation for opening a file above LARGE_FILE_WARN_BYTES. */
+  const [bigFileAsk, setBigFileAsk] = useState<{ path: string; read: FileReadResult } | null>(null);
 
   /** Notices with autoHideMs > 0 dismiss themselves after that time, but only
    * when the currently shown notice is still the same text (a later notice of
@@ -381,6 +389,33 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [themeChoice, prefs]);
 
+  // L3: keep at most KEEP_LOADED_BIG "very large" clean tabs resident. Extra
+  // very-large clean tabs (never the active one, never a dirty one) are
+  // unloaded into lightweight placeholders; they reload on activation.
+  useEffect(() => {
+    if (!settings) return;
+    const loadedBig = tabsState.tabs.filter(
+      (t) =>
+        isEditor(t) &&
+        !t.unloaded &&
+        !tabDirty(t) &&
+        t.model.path != null &&
+        t.cmState.doc.length >= UNLOAD_BIG_CHARS,
+    );
+    if (loadedBig.length <= KEEP_LOADED_BIG) return;
+    let excess = loadedBig.length - KEEP_LOADED_BIG;
+    let next: TabsState = tabsState;
+    for (const t of loadedBig) {
+      // oldest first; keep the active tab resident even if it is very large
+      if (excess <= 0) break;
+      if (t.model.id === tabsState.activeId) continue;
+      next = store.unloadBigTab(next, t.model.id, { theme: themeExt, prefs });
+      excess--;
+    }
+    if (next !== tabsState) setTabsState(next);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tabsState, settings]);
+
   // ---- recent files -----------------------------------------------------------
   const pushRecent = useCallback((path: string) => {
     setSettings((prev) => {
@@ -392,49 +427,118 @@ export default function App() {
   }, []);
 
   // ---- open ----------------------------------------------------------------
-  const openPathAsTab = useCallback(
+  /** Opens an already-read file into a tab. `focus=false` opens in the
+   * background (L2: keep the current tab on screen for big files). */
+  const openLoaded = useCallback(
+    async (path: string, r: FileReadResult, focus: boolean) => {
+      const langExt = await languageForFile(path);
+      const veryLarge = r.content.length >= UNLOAD_BIG_CHARS;
+      setTabsState((prev) =>
+        store.openFile(prev, {
+          path,
+          diskContent: r.content,
+          utf8Ok: r.utf8Ok,
+          utf8Bom: r.utf8Bom,
+          content: r.content,
+          langExt,
+          theme: themeExt,
+          prefs,
+          focus,
+          noHistory: veryLarge,
+        }),
+      );
+      pushRecent(path);
+    },
+    [prefs, themeExt, pushRecent],
+  );
+
+  /** Entry for user-triggered opens (dialog / recent list). Files above the
+   * L1 threshold ask first; confirming opens them in the background (L2). */
+  const openUserFile = useCallback(
     async (path: string) => {
       try {
         const r = await readTextFile(path);
-        const langExt = await languageForFile(path);
-        setTabsState((prev) =>
-          store.openFile(prev, {
-            path,
-            diskContent: r.content,
-            utf8Ok: r.utf8Ok,
-            utf8Bom: r.utf8Bom,
-            content: r.content,
-            langExt,
-            theme: themeExt,
-            prefs,
-          }),
-        );
-        pushRecent(path);
+        if (r.byteLen > LARGE_FILE_WARN_BYTES) {
+          setBigFileAsk({ path, read: r });
+          return;
+        }
+        await openLoaded(path, r, true);
       } catch (e) {
         setNotice(`打开失败：${e}`);
       }
     },
-    [prefs, themeExt, pushRecent],
+    [openLoaded],
   );
 
   const onOpen = useCallback(async () => {
     const picked = await pickAndReadFile();
     if (!picked) return;
     if ("read" in picked) {
-      await openPathAsTab(picked.path);
+      if (picked.read.byteLen > LARGE_FILE_WARN_BYTES) {
+        setBigFileAsk({ path: picked.path, read: picked.read });
+        return;
+      }
+      await openLoaded(picked.path, picked.read, true);
       return;
     }
     const reason = "error" in picked ? `：${picked.error}` : "";
     setNotice(`读取 ${picked.path} 失败${reason}`);
-  }, [openPathAsTab]);
+  }, [openLoaded]);
+
+  const confirmOpenBig = useCallback(() => {
+    const ask = bigFileAsk;
+    if (!ask) return;
+    setBigFileAsk(null);
+    void openLoaded(ask.path, ask.read, false).then(() => {
+      showNotice(`已在后台打开大文件（未切换标签）：${ask.path.split(/[\\/]/).pop()}`);
+    });
+  }, [bigFileAsk, openLoaded, showNotice]);
 
   const onNew = useCallback(() => {
     setTabsState((prev) => store.newUntitled(prev, { theme: themeExt, prefs }));
   }, [prefs, themeExt]);
 
-  const onActivate = useCallback((id: string) => {
-    setTabsState((prev) => store.setActive(prev, id));
-  }, []);
+  /** Activates a tab; an unloaded very-large tab is reloaded from disk first
+   * (L3) with a short "正在加载…" hint. */
+  const onActivate = useCallback(
+    async (id: string) => {
+      const tab = store.getTab(tabsRef.current, id);
+      if (tab && isEditor(tab) && tab.unloaded && tab.model.path) {
+        const path = tab.model.path;
+        setAutosaveText(`正在加载大文件：${tab.model.title}…`);
+        try {
+          const r = await readTextFile(path);
+          const override = tab.model.languageOverride;
+          const langExt = override
+            ? await languageForOverride(override)
+            : await languageForFile(path);
+          const veryLarge = r.content.length >= UNLOAD_BIG_CHARS;
+          setTabsState((prev) => {
+            const next = store.reloadBigTab(prev, id, {
+              path,
+              diskContent: r.content,
+              utf8Ok: r.utf8Ok,
+              utf8Bom: r.utf8Bom,
+              content: r.content,
+              langExt,
+              theme: themeExt,
+              prefs,
+              noHistory: veryLarge,
+            });
+            return store.setActive(next, id);
+          });
+          setAutosaveText("");
+          return;
+        } catch (e) {
+          setAutosaveText("");
+          setNotice(`加载失败：${e}`);
+          return;
+        }
+      }
+      setTabsState((prev) => store.setActive(prev, id));
+    },
+    [prefs, themeExt],
+  );
 
   /** Active editable tab id (preview tabs resolve to their source). */
   const activeEditorId = useMemo(() => {
@@ -743,7 +847,7 @@ export default function App() {
       const k = e.key.toLowerCase();
       // While a modal is open, editor/app shortcuts must not fire on the tab
       // underneath it (e.g. Ctrl+W closing a tab below the settings dialog).
-      if (showSettings || infoDialog || confirmClose || replaceConfirmCount != null) return;
+      if (showSettings || infoDialog || confirmClose || replaceConfirmCount != null || bigFileAsk) return;
       if (mod && k === "s") {
         e.preventDefault();
         if (e.shiftKey) void onSaveAs();
@@ -798,6 +902,7 @@ export default function App() {
     infoDialog,
     confirmClose,
     replaceConfirmCount,
+    bigFileAsk,
   ]);
 
   // ---- language override -------------------------------------------------------
@@ -1005,6 +1110,7 @@ export default function App() {
                 langExt,
                 theme: themeExt,
                 prefs,
+                noHistory: r.content.length >= UNLOAD_BIG_CHARS,
               });
               setTabsState(next);
               const stateMs = performance.now() - tState;
@@ -1069,20 +1175,30 @@ export default function App() {
       }
       // Re-open the files that were open at last exit (session). Existing
       // tabs from snapshot restore are kept (openFile dedupes by path).
+      // L1: files above SESSION_SKIP_BYTES are skipped to keep startup fast.
       try {
         const session = await sessionLoad();
+        let skippedBig = 0;
         if (session.paths.length) {
           for (const p of session.paths) {
             try {
-              if (await pathExists(p)) await openPathAsTab(p);
+              const rr = await readTextFile(p);
+              if (rr.byteLen > SESSION_SKIP_BYTES) {
+                skippedBig++;
+                continue;
+              }
+              await openLoaded(p, rr, true);
             } catch {
-              /* file gone: skip */
+              /* file gone / unreadable: skip */
             }
           }
         }
         if (session.activePath && !cancelled) {
           const t = store.findByPath(tabsRef.current, session.activePath);
           if (t) setTabsState((prev) => store.setActive(prev, t.model.id));
+        }
+        if (skippedBig > 0 && !cancelled) {
+          showNotice(`已跳过 ${skippedBig} 个超大文件（≥${SESSION_SKIP_BYTES / 1048576}MB），可在菜单中手动打开`, 6000);
         }
       } catch {
         /* not in tauri */
@@ -1125,7 +1241,7 @@ export default function App() {
             children: menuChildList(
               (settings?.recentFiles ?? []).map((f) => ({
                 label: f,
-                onClick: () => void openPathAsTab(f),
+                onClick: () => void openUserFile(f),
               })),
             ),
           },
@@ -1194,7 +1310,7 @@ export default function App() {
     onSave,
     onSaveAs,
     onPreview,
-    openPathAsTab,
+    openUserFile,
     requestQuit,
     runEditorCommand,
     onFind,
@@ -1435,6 +1551,27 @@ export default function App() {
               全部替换
             </button>
             <button className="btn" onClick={() => setReplaceConfirmCount(null)}>
+              取消
+            </button>
+          </div>
+        </Modal>
+      )}
+
+      {bigFileAsk && (
+        <Modal title="打开大文件" width={460} onClose={() => setBigFileAsk(null)}>
+          <div className="info-body">
+            <p>
+              文件 <b>{(bigFileAsk.path.split(/[\\/]/).pop() ?? bigFileAsk.path)}</b>{" "}
+              约 {Math.round(bigFileAsk.read.byteLen / 1048576)}MB（超过{" "}
+              {Math.round(LARGE_FILE_WARN_BYTES / 1048576)}MB）。大文件会占用较多内存与
+              打开时间，建议在<b>后台打开</b>：不切换当前标签，加载完成后用标签栏切换。
+            </p>
+          </div>
+          <div className="modal-foot">
+            <button className="btn primary" onClick={() => void confirmOpenBig()}>
+              后台打开
+            </button>
+            <button className="btn" onClick={() => setBigFileAsk(null)}>
               取消
             </button>
           </div>

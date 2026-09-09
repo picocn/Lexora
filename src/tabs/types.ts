@@ -41,6 +41,9 @@ export interface Tab {
   langExt: Extension | null;
   /** Content at the last autosave snapshot (change detection). */
   lastSnapshotContent: string | null;
+  /** True when a very large clean tab was unloaded to a lightweight
+   * placeholder (cmState holds an empty doc; reloaded on activation). */
+  unloaded?: boolean;
 }
 
 export interface TabsState {
@@ -58,9 +61,10 @@ export function isPreview(t: Tab): boolean {
 }
 
 /** True when the current editor content differs from the disk anchor.
- * Preview tabs are never dirty. */
+ * Preview tabs are never dirty; unloaded (placeholder) tabs are clean by
+ * definition - they were only unloaded while content == disk. */
 export function tabDirty(tab: Tab): boolean {
-  if (!isEditor(tab)) return false;
+  if (!isEditor(tab) || tab.unloaded) return false;
   return tab.cmState.doc.toString() !== tab.model.diskContent;
 }
 

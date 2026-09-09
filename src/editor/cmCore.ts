@@ -59,7 +59,6 @@ export const CM_PHRASES: Record<string, string> = {
 };
 
 export const baseExtensions: Extension[] = [
-  history(),
   drawSelection(),
   highlightActiveLine(),
   highlightActiveLineGutter(),
@@ -67,8 +66,13 @@ export const baseExtensions: Extension[] = [
   bracketMatching(),
   foldGutter(),
   highlightSelectionMatches(),
-  keymap.of([...defaultKeymap, ...historyKeymap, ...foldKeymap, ...searchKeymap, indentWithTab]),
+  keymap.of([...defaultKeymap, ...foldKeymap, ...searchKeymap, indentWithTab]),
 ];
+
+/** Optional per-tab: undo/redo history (skipped for very large documents). */
+export function historyExtension(noHistory: boolean): Extension[] {
+  return noHistory ? [] : [history(), keymap.of(historyKeymap)];
+}
 
 export function prefsExtension(prefs: EditorPrefs): Extension {
   return [
@@ -95,6 +99,8 @@ export function createEditorState(opts: {
   language?: Extension | null;
   theme: Extension;
   prefs: EditorPrefs;
+  /** Skip undo/redo history (very large documents). Defaults to false. */
+  noHistory?: boolean;
 }): CreatedState {
   const lang = new Compartment();
   const theme = new Compartment();
@@ -104,6 +110,7 @@ export function createEditorState(opts: {
     doc: opts.doc,
     extensions: [
       ...baseExtensions,
+      ...historyExtension(!!opts.noHistory),
       EditorState.phrases.of(CM_PHRASES),
       EditorView.updateListener.of((update) => {
         if (update.docChanged) {

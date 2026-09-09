@@ -56,4 +56,5 @@ npx tauri build        # 仅构建、不升版本号（通常调试用）
 
 - `src/` React 前端（`components/`、`editor/`、`tabs/`、`preview/`、`ipc/`、`styles/`）
 - `src-tauri/` Rust 后端（`commands/{files,snapshots,settings}.rs`）
+- `docs/` 验收清单（`acceptance.zh.md`）与性能/大文件方案（`large-file-strategy.zh.md`）
 - `scripts/crates-proxy.mjs`、`scripts/gen-icon.mjs`

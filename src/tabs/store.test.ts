@@ -14,6 +14,8 @@ import {
   openPreview,
   findPreviewFor,
   stem,
+  unloadBigTab,
+  reloadBigTab,
 } from "./store";
 import { tabDirty, isPreview, isEditor } from "./types";
 import type { EditorPrefs } from "../editor/cmCore";
@@ -204,5 +206,81 @@ describe("预览标签页", () => {
     expect(pvAfter.model).toEqual(pvModelBefore);
     expect(pvAfter.model.path).toBeNull();
     expect(pvAfter.model.docKey).toBe(pv.model.docKey);
+  });
+});
+
+describe("large-file open options (L2/L3)", () => {
+  it("openFile with focus:false keeps the current active tab", () => {
+    let s = withFile(emptyState(), FILE_A, "# A");
+    const activeA = s.activeId;
+    s = openFile(s, {
+      path: FILE_B,
+      diskContent: "b",
+      utf8Ok: true,
+      content: "b",
+      langExt: null,
+      theme,
+      prefs,
+      focus: false,
+    });
+    expect(s.activeId).toBe(activeA);
+    expect(findByPath(s, FILE_B)).toBeDefined();
+    // default focus=true activates the new tab
+    s = openFile(s, {
+      path: FILE_B,
+      diskContent: "b",
+      utf8Ok: true,
+      content: "b",
+      langExt: null,
+      theme,
+      prefs,
+    });
+    expect(s.activeId).toBe(findByPath(s, FILE_B)!.model.id);
+  });
+
+  it("unloadBigTab swaps in an empty placeholder that is not dirty", () => {
+    let s = withFile(emptyState(), FILE_A, "some large content");
+    const id = s.activeId!;
+    s = unloadBigTab(s, id, { theme, prefs });
+    const t = getActive(s)!;
+    expect(t.unloaded).toBe(true);
+    expect(t.cmState.doc.length).toBe(0);
+    expect(t.model.path).toBe(FILE_A);
+    expect(tabDirty(t)).toBe(false);
+  });
+
+  it("reloadBigTab restores content in place keeping id and order", () => {
+    let s = withFile(emptyState(), FILE_A, "large A");
+    const idA = s.activeId!;
+    s = openFile(s, {
+      path: FILE_B,
+      diskContent: "b",
+      utf8Ok: true,
+      content: "b",
+      langExt: null,
+      theme,
+      prefs,
+    });
+    const idB = s.activeId!;
+    s = unloadBigTab(s, idA, { theme, prefs });
+    // reload A in place (fresh content == disk anchor => clean)
+    s = reloadBigTab(s, idA, {
+      path: FILE_A,
+      diskContent: "large A (fresh)",
+      utf8Ok: true,
+      utf8Bom: false,
+      content: "large A (fresh)",
+      langExt: null,
+      theme,
+      prefs,
+    });
+    expect(s.tabs.map((t) => t.model.id)).toEqual([idA, idB]);
+    const a = findByPath(s, FILE_A)!;
+    expect(a.unloaded).toBe(false);
+    expect(a.cmState.doc.toString()).toBe("large A (fresh)");
+    expect(tabDirty(a)).toBe(false); // content == diskContent anchor
+    // and editing after reload makes it dirty again
+    const edited = { ...a, cmState: a.cmState.update({ changes: { from: 0, to: a.cmState.doc.length, insert: "changed" } }).state };
+    expect(tabDirty(edited)).toBe(true);
   });
 });
