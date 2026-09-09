@@ -139,7 +139,7 @@ body {
   max-height: 320px;
   overflow-y: auto;
   min-width: 230px;
-  background: var(--panel-bg);
+  background: var(--bg); /* follow the selected theme */
   color: var(--fg);
   padding: 4px;
 }
@@ -682,7 +682,7 @@ body {
 }
 
 .modal {
-  background: var(--panel-bg);
+  background: var(--bg); /* follow the selected theme (settings/info/… dialogs) */
   color: var(--fg);
   border: 1px solid var(--border);
   border-radius: 12px;

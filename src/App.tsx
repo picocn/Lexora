@@ -485,7 +485,7 @@ export default function App() {
   const pushRecent = useCallback((path: string) => {
     setSettings((prev) => {
       if (!prev) return prev;
-      const next = { ...prev, recentFiles: [path, ...prev.recentFiles.filter((f) => f !== path)].slice(0, 10) };
+      const next = { ...prev, recentFiles: [path, ...prev.recentFiles.filter((f) => f !== path)].slice(0, 20) };
       writeSettings(next).catch(() => {});
       return next;
     });

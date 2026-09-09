@@ -132,7 +132,7 @@ pub struct AppSettings {
     /// "split" | "edit" | "preview"
     #[serde(default)]
     pub layout: String,
-    /// Most recently opened files (most recent first), max 10.
+    /// Most recently opened files (most recent first), max 20.
     #[serde(default)]
     pub recent_files: Vec<String>,
 }
@@ -222,7 +222,7 @@ pub fn read_settings(app: AppHandle) -> Result<AppSettings, String> {
         } else {
             def.layout
         },
-        recent_files: stored.recent_files.into_iter().take(10).collect(),
+        recent_files: stored.recent_files.into_iter().take(20).collect(),
     })
 }
 
