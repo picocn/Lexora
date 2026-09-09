@@ -6,7 +6,7 @@
 - [x] `tsc --noEmit`
 - [x] `npm run build`（vite 产物）
 - [x] `cargo clippy --all-targets` 无 error
-- [x] `npx tauri build` 产出安装包（0.2.1：msi + nsis-setup + exe，冒烟启动通过）
+- [x] `npx tauri build` 产出安装包（0.2.2：msi + nsis-setup + exe，冒烟启动通过）
 
 ## 功能验收（需在 `tauri dev` 窗口中人工确认）
 ### 窗口与菜单结构
