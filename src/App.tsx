@@ -207,6 +207,27 @@ export default function App() {
   const [bigFileAsk, setBigFileAsk] = useState<{ path: string; read: FileReadResult } | null>(null);
   /** Whether the main window is currently maximized (caption button glyph). */
   const [winMaximized, setWinMaximized] = useState(false);
+  /** Brand dropdown (logo + app name click reveals 文件/编辑/帮助). */
+  const [brandMenuOpen, setBrandMenuOpen] = useState(false);
+  const brandRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!brandMenuOpen) return;
+    const onDown = (e: MouseEvent) => {
+      if (!brandRef.current?.contains(e.target as Node)) setBrandMenuOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setBrandMenuOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [brandMenuOpen]);
+
+  const closeBrandMenu = useCallback(() => setBrandMenuOpen(false), []);
 
   const refreshMaximized = useCallback(async () => {
     const v = await withMainWindow((w) => w.isMaximized());
@@ -1503,17 +1524,22 @@ export default function App() {
   return (
     <div className="app-root" style={cssVars}>
       <div className="title-row">
-        <div
-          className="title-brand"
-          onMouseDown={startWindowDrag}
-          onDoubleClick={() => void onToggleMaximize()}
-          title="双击最大化/还原"
-        >
-          <img className="title-icon" src="icons/32x32.png" alt="" draggable={false} />
-          <span className="title-name">Lexora</span>
-        </div>
-        <div className="title-menus">
-          <MenuBar groups={menuGroups} />
+        <div className="brand-drop" ref={brandRef}>
+          <div
+            className={`title-brand ${brandMenuOpen ? "open" : ""}`}
+            onClick={() => setBrandMenuOpen((o) => !o)}
+            onMouseDown={startWindowDrag}
+            onDoubleClick={() => void onToggleMaximize()}
+            title="菜单（点击展开 文件/编辑/帮助）"
+          >
+            <img className="title-icon" src="icons/32x32.png" alt="" draggable={false} />
+            <span className="title-name">Lexora</span>
+          </div>
+          {brandMenuOpen && (
+            <div className="brand-pop">
+              <MenuBar groups={menuGroups} onItemAction={closeBrandMenu} />
+            </div>
+          )}
         </div>
         <TabBar
           tabs={viewTabs(tabsState, (t) =>

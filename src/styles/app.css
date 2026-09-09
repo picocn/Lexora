@@ -1228,3 +1228,47 @@ body {
 .title-row .tabbar-empty {
   padding: 0 6px;
 }
+
+/* ---------- brand dropdown menu (menus live behind logo+name) ---------- */
+.brand-drop {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  flex: 0 0 auto;
+}
+.title-brand {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 10px 0 9px;
+  cursor: pointer;
+}
+.title-brand:hover {
+  background: color-mix(in srgb, var(--fg, #333) 7%, transparent);
+}
+.title-brand.open {
+  background: color-mix(in srgb, var(--fg, #333) 10%, transparent);
+}
+.brand-pop {
+  position: absolute;
+  top: calc(100% + 1px);
+  left: 0;
+  min-width: 200px;
+  background: var(--panel-bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 4px;
+  box-shadow: 0 10px 30px rgb(0 0 0 / 0.28);
+  z-index: 120;
+}
+.brand-pop .menubar {
+  background: transparent;
+  border-bottom: none;
+  min-height: auto;
+  padding: 0;
+  flex-wrap: wrap;
+}
+.brand-pop .menu-panel {
+  top: 100%;
+}

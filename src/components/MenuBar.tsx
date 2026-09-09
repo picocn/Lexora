@@ -20,9 +20,17 @@ export interface MenuGroupDef {
   items: MenuItemDef[];
 }
 
-/** Simple top menu bar (文件 / 编辑 / 帮助 …). Menus open on click; an item
- * click runs its action and closes; a sub-item with children toggles open. */
-export function MenuBar({ groups }: { groups: MenuGroupDef[] }) {
+/** Simple menu groups (文件 / 编辑 / 帮助 …) usable both as a top bar or
+ * inside the brand dropdown. Menus open on click; with one open, hovering
+ * another group switches to it; an item click runs its action and closes. */
+export function MenuBar({
+  groups,
+  onItemAction,
+}: {
+  groups: MenuGroupDef[];
+  /** Called after any menu item action runs (lets an outer popover close). */
+  onItemAction?: () => void;
+}) {
   const [openKey, setOpenKey] = useState<string | null>(null);
   const barRef = useRef<HTMLDivElement | null>(null);
 
@@ -65,7 +73,7 @@ export function MenuBar({ groups }: { groups: MenuGroupDef[] }) {
           {openKey === g.key && (
             <div className="menu-panel" role="menu">
               {g.items.map((item, i) => (
-                <MenuRow key={i} item={item} close={close} />
+                <MenuRow key={i} item={item} close={close} onItemAction={onItemAction} />
               ))}
             </div>
           )}
@@ -75,7 +83,15 @@ export function MenuBar({ groups }: { groups: MenuGroupDef[] }) {
   );
 }
 
-function MenuRow({ item, close }: { item: MenuItemDef; close: () => void }) {
+function MenuRow({
+  item,
+  close,
+  onItemAction,
+}: {
+  item: MenuItemDef;
+  close: () => void;
+  onItemAction?: () => void;
+}) {
   const [open, setOpen] = useState(false);
   // Closing is delayed briefly so the cursor can travel from the parent item
   // across the small gap into the submenu without it vanishing.
@@ -112,6 +128,7 @@ function MenuRow({ item, close }: { item: MenuItemDef; close: () => void }) {
     if (item.onAction) {
       close();
       item.onAction();
+      onItemAction?.();
     } else if (hasChildren) {
       setOpen((o) => !o);
     }
