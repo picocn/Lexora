@@ -1515,62 +1515,69 @@ export default function App() {
         <div className="title-menus">
           <MenuBar groups={menuGroups} />
         </div>
-        <div
-          className="title-spacer"
-          onMouseDown={startWindowDrag}
-          onDoubleClick={() => void onToggleMaximize()}
+        <TabBar
+          tabs={viewTabs(tabsState, (t) =>
+            t.model.languageOverride ? labelOfOverride(t.model.languageOverride) : labelForName(t.model.title),
+          )}
+          activeId={tabsState.activeId}
+          onActivate={onActivate}
+          onClose={requestCloseTab}
         />
-        <div className="title-controls">
+        <div className="title-actions">
+          {activePreviewKind != null && (
+            <button className="btn preview-btn" onClick={onPreview} title="预览（文件 → 预览 / Ctrl+P）">
+              ▶ 预览
+            </button>
+          )}
           <button
-            className="title-btn"
-            aria-label="最小化"
-            title="最小化"
-            onClick={() => void minimizeWindow()}
+            className="tab-new"
+            onClick={onNew}
+            title="新建标签 (Ctrl+N)"
+            aria-label="新建标签"
           >
-            <svg className="cap-icon" width="12" height="12" viewBox="0 0 10 10" aria-hidden="true">
-              <path d="M0 5h10" stroke="currentColor" strokeWidth="1" />
-            </svg>
+            ＋
           </button>
-          <button
-            className="title-btn"
-            aria-label={winMaximized ? "还原" : "最大化"}
-            title={winMaximized ? "还原" : "最大化"}
-            onClick={() => void onToggleMaximize()}
-          >
-            {winMaximized ? (
+          <div className="win-controls">
+            <button
+              className="title-btn"
+              aria-label="最小化"
+              title="最小化"
+              onClick={() => void minimizeWindow()}
+            >
               <svg className="cap-icon" width="12" height="12" viewBox="0 0 10 10" aria-hidden="true">
-                <rect x="0.5" y="2.5" width="7" height="7" fill="var(--panel-bg)" stroke="currentColor" strokeWidth="1" />
-                <rect x="2.5" y="0.5" width="7" height="7" fill="none" stroke="currentColor" strokeWidth="1" />
+                <path d="M0 5h10" stroke="currentColor" strokeWidth="1" />
               </svg>
-            ) : (
+            </button>
+            <button
+              className="title-btn"
+              aria-label={winMaximized ? "还原" : "最大化"}
+              title={winMaximized ? "还原" : "最大化"}
+              onClick={() => void onToggleMaximize()}
+            >
+              {winMaximized ? (
+                <svg className="cap-icon" width="12" height="12" viewBox="0 0 10 10" aria-hidden="true">
+                  <rect x="0.5" y="2.5" width="7" height="7" fill="var(--panel-bg)" stroke="currentColor" strokeWidth="1" />
+                  <rect x="2.5" y="0.5" width="7" height="7" fill="none" stroke="currentColor" strokeWidth="1" />
+                </svg>
+              ) : (
+                <svg className="cap-icon" width="12" height="12" viewBox="0 0 10 10" aria-hidden="true">
+                  <rect x="0.5" y="0.5" width="9" height="9" fill="none" stroke="currentColor" strokeWidth="1" />
+                </svg>
+              )}
+            </button>
+            <button
+              className="title-btn title-close"
+              aria-label="关闭"
+              title="关闭"
+              onClick={() => void requestQuit()}
+            >
               <svg className="cap-icon" width="12" height="12" viewBox="0 0 10 10" aria-hidden="true">
-                <rect x="0.5" y="0.5" width="9" height="9" fill="none" stroke="currentColor" strokeWidth="1" />
+                <path d="M0.8 0.8 9.2 9.2 M9.2 0.8 0.8 9.2" stroke="currentColor" strokeWidth="1.1" />
               </svg>
-            )}
-          </button>
-          <button
-            className="title-btn title-close"
-            aria-label="关闭"
-            title="关闭"
-            onClick={() => void requestQuit()}
-          >
-            <svg className="cap-icon" width="12" height="12" viewBox="0 0 10 10" aria-hidden="true">
-              <path d="M0.8 0.8 9.2 9.2 M9.2 0.8 0.8 9.2" stroke="currentColor" strokeWidth="1.1" />
-            </svg>
-          </button>
+            </button>
+          </div>
         </div>
       </div>
-      <TabBar
-        tabs={viewTabs(tabsState, (t) =>
-          t.model.languageOverride ? labelOfOverride(t.model.languageOverride) : labelForName(t.model.title),
-        )}
-        activeId={tabsState.activeId}
-        canPreview={activePreviewKind != null}
-        onActivate={onActivate}
-        onClose={requestCloseTab}
-        onPreview={onPreview}
-        onNewTab={onNew}
-      />
       <div className="workbench">{workbench}</div>
       <StatusBar
         tabTitle={activeTab?.model.title ?? null}

@@ -4,21 +4,17 @@ import type { TabView } from "./appState";
 export interface TabBarProps {
   tabs: TabView[];
   activeId: string | null;
-  /** True when the active editor tab is markdown (preview button available). */
-  canPreview: boolean;
   onActivate: (id: string) => void;
   onClose: (id: string) => void;
-  onPreview: () => void;
-  /** Opens a new untitled editor tab (Ctrl+N). */
-  onNewTab: () => void;
 }
 
+/** Tab strip (embedded in the single top bar): ‹ › cycling + tabs with
+ * auto-reveal of the active tab. +/preview/window controls live in the
+ * surrounding top bar actions. */
 export function TabBar(p: TabBarProps) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
-  // Keep the active tab visible when it is activated through the arrows, the
-  // +/open flows, or session restore. Native scrollbar is hidden; this is the
-  // only way to move along a long tab strip.
+  // Keep the active tab visible (arrows, open flows, session restore).
   useEffect(() => {
     const el = scrollRef.current;
     if (!el || !p.activeId) return;
@@ -28,7 +24,6 @@ export function TabBar(p: TabBarProps) {
 
   const n = p.tabs.length;
   const idx = p.activeId ? p.tabs.findIndex((t) => t.id === p.activeId) : -1;
-  // 上一个 / 下一个（两端循环；无活动标签时上箭头到最后、下箭头到第一个）。
   const prevTarget = idx > 0 ? p.tabs[idx - 1].id : n > 0 ? p.tabs[n - 1].id : null;
   const nextTarget = idx >= 0 && idx < n - 1 ? p.tabs[idx + 1].id : n > 0 ? p.tabs[0].id : null;
 
@@ -83,22 +78,6 @@ export function TabBar(p: TabBarProps) {
           </div>
         ))}
         {p.tabs.length === 0 && <span className="tabbar-empty">Lexora</span>}
-      </div>
-
-      <div className="tabbar-actions">
-        <button
-          className="tab-new"
-          onClick={p.onNewTab}
-          title="新建标签 (Ctrl+N)"
-          aria-label="新建标签"
-        >
-          ＋
-        </button>
-        {p.canPreview && (
-          <button className="btn preview-btn" onClick={p.onPreview} title="在标签页中预览 Markdown">
-            ▶ 预览
-          </button>
-        )}
       </div>
     </div>
   );

@@ -1182,3 +1182,49 @@ body {
 .preview-pane h4[id], .preview-pane h5[id], .preview-pane h6[id] {
   scroll-margin-top: 12px;
 }
+
+/* ---------- single top bar: menus + embedded tab strip + actions ---------- */
+.title-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 0 0 6px;
+  flex: 0 0 auto;
+}
+.title-actions .preview-btn {
+  padding: 3px 8px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.title-actions .tab-new {
+  width: 26px;
+  height: 26px;
+  flex: 0 0 auto;
+}
+.win-controls {
+  display: flex;
+  align-items: stretch;
+  height: 100%;
+  margin-left: 4px;
+}
+.win-controls .title-btn {
+  height: 100%;
+}
+
+/* The tab strip now lives inside the single 36px top bar. */
+.title-row .tabbar {
+  height: 100%;
+  background: transparent;
+  border-bottom: none;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.title-row .tabbar-scroll {
+  scrollbar-width: none;
+}
+.title-row .tabbar .tab {
+  margin: 0 2px 0 0;
+}
+.title-row .tabbar-empty {
+  padding: 0 6px;
+}

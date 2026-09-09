@@ -54,6 +54,11 @@ export function MenuBar({ groups }: { groups: MenuGroupDef[] }) {
               e.stopPropagation();
               setOpenKey(openKey === g.key ? null : g.key);
             }}
+            onMouseEnter={() => {
+              // Once a menu is open, hovering another group switches to it
+              // (classic desktop/VSCode behavior).
+              if (openKey && openKey !== g.key) setOpenKey(g.key);
+            }}
           >
             {g.label}
           </button>
