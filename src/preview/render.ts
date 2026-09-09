@@ -69,6 +69,109 @@ md.core.ruler.after("inline", "task-lists", (state) => {
   return true;
 });
 
+// ---- anchors + [TOC] ---------------------------------------------------------
+// GitHub-style behavior: every heading gets an auto-generated `id` (unicode
+// aware slug, duplicates get -2/-3...), so `[跳转](#slug)` works in-preview.
+// A standalone `[TOC]` line is replaced by a generated table of contents.
+
+/** GitHub-ish slug: unicode letters/digits kept, others collapsed to '-'. */
+function slugify(text: string): string {
+  const base = text
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, "-")
+    .replace(/^-+|-+$/g, "");
+  return base || "section";
+}
+
+function escHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+/** Collects a heading's plain text (from its inline children). */
+function headingText(state: { tokens: unknown[] }, openIdx: number): string {
+  const tokens = state.tokens as Array<{
+    type: string;
+    content: string;
+    children?: Array<{ type: string; content: string }>;
+  }>;
+  let out = "";
+  for (let j = openIdx + 1; j < tokens.length; j++) {
+    const t = tokens[j];
+    if (t.type === "heading_close") break;
+    if (t.type === "inline") {
+      if (t.children?.length) {
+        for (const c of t.children) {
+          if (c.type === "text" || c.type === "code_inline") out += c.content;
+        }
+      } else {
+        out += t.content;
+      }
+    }
+  }
+  return out.trim();
+}
+
+md.core.ruler.after("inline", "anchors-toc", (state) => {
+  const tokens = state.tokens as Array<{
+    type: string;
+    tag?: string;
+    content: string;
+    attrSet?: (name: string, value: string) => void;
+    level?: number;
+  }>;
+  const used = new Set<string>();
+  const headings: Array<{ level: number; text: string; id: string }> = [];
+  const headingOpen: Array<{ idx: number; level: number }> = [];
+
+  for (let i = 0; i < tokens.length; i++) {
+    const t = tokens[i];
+    if (t.type !== "heading_open" || !t.tag) continue;
+    const level = Number(t.tag.slice(1)) || 1;
+    headingOpen.push({ idx: i, level });
+    const text = headingText(state, i);
+    const base = slugify(text);
+    let id = base;
+    let n = 2;
+    while (used.has(id)) id = `${base}-${n++}`;
+    used.add(id);
+    t.attrSet?.("id", id);
+    headings.push({ level, text, id });
+  }
+  void headingOpen;
+
+  if (headings.length === 0) return true;
+
+  const tocHtml =
+    headings.length > 0
+      ? `<nav class="md-toc"><ul>${headings
+          .map(
+            (h) =>
+              `<li class="toc-l${Math.min(Math.max(h.level, 1), 6)}"><a href="#${encodeURIComponent(h.id)}">${escHtml(h.text)}</a></li>`,
+          )
+          .join("")}</ul></nav>`
+      : "";
+
+  // Replace a standalone paragraph whose text is exactly "[TOC]".
+  for (let i = 0; i < tokens.length; i++) {
+    const t = tokens[i];
+    if (t.type !== "paragraph_open") continue;
+    const inline = tokens[i + 1];
+    if (!inline || inline.type !== "inline") continue;
+    if ((inline.content ?? "").trim() === "[TOC]") {
+      const nav = new state.Token("html_block", "", 0);
+      nav.content = tocHtml;
+      tokens.splice(i, 3, nav);
+      break; // only the first [TOC]
+    }
+  }
+  return true;
+});
+
 /** Renders markdown source to an HTML string. Safe: html:false. */
 export function renderMarkdown(src: string): string {
   return md.render(src);

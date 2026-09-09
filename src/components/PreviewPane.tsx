@@ -185,6 +185,24 @@ export const PreviewPane = forwardRef<PreviewPaneHandle, PreviewPaneProps>(
           e.preventDefault();
           e.stopPropagation();
           void openExternal(href).catch(() => {});
+          return;
+        }
+        if (href.startsWith("#") && href.length > 1) {
+          // In-document anchor: smooth-scroll to the heading (no navigation).
+          e.preventDefault();
+          e.stopPropagation();
+          let id: string;
+          try {
+            id = decodeURIComponent(href.slice(1));
+          } catch {
+            id = href.slice(1);
+          }
+          const host = anchor.getRootNode() as Document | null;
+          const found =
+            host?.getElementById(id) ??
+            host?.querySelector(`[id="${CSS.escape(id)}"]`) ??
+            document.getElementById(id);
+          found?.scrollIntoView({ behavior: "smooth", block: "start" });
         }
       };
       el.addEventListener("click", onPreviewClick, true);

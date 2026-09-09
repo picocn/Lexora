@@ -1149,3 +1149,36 @@ body {
   border: none;
   background: #fff;
 }
+
+/* ---------- markdown TOC + heading anchors ---------- */
+.md-toc {
+  margin: 6px 0 14px;
+  padding: 8px 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--fg, #333) 3%, transparent);
+  font-size: 13px;
+}
+.md-toc ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.md-toc li {
+  margin: 2px 0;
+  line-height: 1.5;
+}
+.md-toc li.toc-l1 { margin-left: 0; font-weight: 600; }
+.md-toc li.toc-l2 { margin-left: 16px; }
+.md-toc li.toc-l3 { margin-left: 32px; }
+.md-toc li.toc-l4, .md-toc li.toc-l5, .md-toc li.toc-l6 { margin-left: 48px; }
+.md-toc a {
+  color: var(--accent);
+  text-decoration: none;
+  cursor: pointer;
+}
+.md-toc a:hover { text-decoration: underline; }
+.preview-pane h1[id], .preview-pane h2[id], .preview-pane h3[id],
+.preview-pane h4[id], .preview-pane h5[id], .preview-pane h6[id] {
+  scroll-margin-top: 12px;
+}

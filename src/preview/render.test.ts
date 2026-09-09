@@ -29,13 +29,27 @@ describe("markdown 预览渲染", () => {
 
   it("stamps data-line anchors for scroll sync", () => {
     const html = renderMarkdown("# 标题\n\n正文段\n\n| a |\n|---|\n| 1 |\n\n- 项");
-    expect(html).toContain('<h1 data-line="1"');
+    expect(html).toContain('id="标题"');
+    expect(html).toContain('data-line="1"');
     expect(html).toContain('<p data-line="3"');
     expect(html).toContain('<table data-line="5"');
     expect(html).toMatch(/<li data-line="\d+"/);
     // Fenced code blocks get data-line too.
     const fenced = renderMarkdown("```js\nconst x = 1;\n```");
     expect(fenced).toContain('<pre data-line="1"');
+  });
+
+  it("generates heading anchors and a [TOC] block", () => {
+    const html = renderMarkdown("[TOC]\n\n# 快速上手\n\n## 安装 & 配置\n\n# 快速上手\n\n正文");
+    // duplicate heading gets a -2 suffix; Chinese stays as the id
+    expect(html).toContain('<h1 id="快速上手"');
+    expect(html).toContain('<h1 id="快速上手-2"');
+    expect(html).toContain('<h2 id="安装-配置"');
+    expect(html).toContain('class="md-toc"');
+    expect(html).toMatch(/href="#%E5%BF%AB%E9%80%9F%E4%B8%8A%E6%89%8B"/);
+    // without [TOC] no nav is emitted
+    const noToc = renderMarkdown("# 只有标题");
+    expect(noToc).not.toContain("md-toc");
   });
 
   it("highlights fenced code blocks with hljs classes", () => {
