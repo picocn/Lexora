@@ -38,6 +38,9 @@ GC/渲染/IPC 压力。→ 解法必须限制“常驻的超大文档数量”�
   并提示占用与耗时（见 `LARGE_FILE_WARN_BYTES`）。
 - 会话恢复（下次启动重开上次文件）跳过 ≥ `64MB` 的文件并提示已跳过数量
   （`SESSION_SKIP_BYTES`），避免一开机就默默载入若干 GB。
+- **预览护栏（防 OOM）**：markdown 预览是“整篇渲染成 HTML/DOM”，超过
+  `PREVIEW_MAX_CHARS = 800 万字符` 的文档直接禁用预览并提示（见 PreviewPane），
+  三种预览入口（预览标签 / 分屏 / 仅预览）同样生效。
 
 ### L2 —— 前台体验优化
 - 确认后的大文件以**后台方式**打开：`openFile(..., focus:false)` 不抢占当前标签，

@@ -13,3 +13,8 @@ export const KEEP_LOADED_BIG = 4;
 
 /** Startup / session restore skips files above this size (L1). */
 export const SESSION_SKIP_BYTES = 64 * 1024 * 1024; // 64 MB
+
+/** Preview (markdown -> HTML/DOM) is disabled above this document size in
+ * characters: whole-document rendering of very large text OOMs the webview.
+ * Applies to preview tabs, split view and live-preview layout alike. */
+export const PREVIEW_MAX_CHARS = 8_000_000;

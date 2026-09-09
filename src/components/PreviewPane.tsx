@@ -10,6 +10,7 @@ import { renderMarkdown } from "../preview/render";
 import { renderMermaidIn } from "../preview/mermaid";
 import { dirnameOf, resolveLocalImageSrc } from "../preview/imagePath";
 import { readImageBase64 } from "../ipc/commands";
+import { PREVIEW_MAX_CHARS } from "../tabs/thresholds";
 
 export interface PreviewPaneHandle {
   /** Scroll the preview so the markdown source line appears near the top. */
@@ -37,7 +38,12 @@ export const PreviewPane = forwardRef<PreviewPaneHandle, PreviewPaneProps>(
     { text, fontFamily, fontSize, vars, debounceMs = 300, basePath, onPreviewScroll },
     ref,
   ) {
-    const [html, setHtml] = useState(() => renderMarkdown(text));
+    // Whole-document markdown rendering of extremely large docs OOMs the
+    // webview; above the limit we show a notice instead of rendering.
+    const overLimit = text.length > PREVIEW_MAX_CHARS;
+    const [html, setHtml] = useState(() =>
+      overLimit ? "" : renderMarkdown(text),
+    );
     const timer = useRef<number | null>(null);
     const scrollRef = useRef<HTMLDivElement | null>(null);
     const onPreviewScrollRef = useRef(onPreviewScroll);
@@ -45,6 +51,12 @@ export const PreviewPane = forwardRef<PreviewPaneHandle, PreviewPaneProps>(
     const suppressRef = useRef(false);
 
     useEffect(() => {
+      if (text.length > PREVIEW_MAX_CHARS) {
+        if (timer.current) window.clearTimeout(timer.current);
+        timer.current = null;
+        setHtml("");
+        return;
+      }
       if (timer.current) window.clearTimeout(timer.current);
       timer.current = window.setTimeout(() => {
         setHtml(renderMarkdown(text));
@@ -111,6 +123,32 @@ export const PreviewPane = forwardRef<PreviewPaneHandle, PreviewPaneProps>(
         });
       },
     }));
+
+    if (overLimit) {
+      const wan = Math.ceil(text.length / 10000);
+      return (
+        <div className="preview-scroll" ref={scrollRef}>
+          <div
+            className="preview-pane preview-disabled"
+            style={{
+              ...vars,
+              fontFamily,
+              fontSize: `${fontSize}px`,
+            }}
+          >
+            <div className="preview-disabled-box">
+              <div className="preview-disabled-title">预览已禁用</div>
+              <p>
+                当前文档约 <b>{wan}</b> 万字符，超过预览上限
+                （{Math.round(PREVIEW_MAX_CHARS / 10000)} 万字符）。整篇渲染会占用
+                大量内存并可能导致内存溢出（OOM）。
+              </p>
+              <p>请在编辑区查看与编辑内容；如需预览，请将文档拆分为更小的文件。</p>
+            </div>
+          </div>
+        </div>
+      );
+    }
 
     return (
       <div className="preview-scroll" ref={scrollRef}>

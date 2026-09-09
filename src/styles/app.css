@@ -1092,3 +1092,26 @@ body {
   border-color: var(--accent);
   color: var(--accent);
 }
+
+/* ---------- preview disabled (very large docs) ---------- */
+.preview-disabled {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+}
+.preview-disabled-box {
+  margin: 48px 24px;
+  max-width: 520px;
+  padding: 18px 20px;
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--fg, #333) 4%, transparent);
+  font-size: 13px;
+  line-height: 1.7;
+}
+.preview-disabled-title {
+  font-weight: 700;
+  font-size: 15px;
+  margin-bottom: 6px;
+  color: var(--accent);
+}
