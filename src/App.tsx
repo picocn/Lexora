@@ -1523,18 +1523,35 @@ export default function App() {
 
   return (
     <div className="app-root" style={cssVars}>
-      <div className="title-row">
+      <div
+        className="title-row"
+        onMouseDown={(e) => {
+          // Window drag from empty top-bar areas only; interactive elements
+          // (tabs, arrows, menus, buttons, brand) never start a drag.
+          const target = e.target as HTMLElement;
+          if (target.closest(".title-brand, button, a, input, select, .menubar, .menu, .tab, .tab-arrow, .tab-close, .win-controls, .tab-new")) {
+            return;
+          }
+          startWindowDrag(e);
+        }}
+        onDoubleClick={(e) => {
+          const target = e.target as HTMLElement;
+          if (target.closest(".title-brand, button, .tab, .tab-arrow, .menu, a, input, select")) {
+            return;
+          }
+          void onToggleMaximize();
+        }}
+      >
         <div className="brand-drop" ref={brandRef}>
-          <div
+          <button
+            type="button"
             className={`title-brand ${brandMenuOpen ? "open" : ""}`}
             onClick={() => setBrandMenuOpen((o) => !o)}
-            onMouseDown={startWindowDrag}
-            onDoubleClick={() => void onToggleMaximize()}
             title="菜单（点击展开 文件/编辑/帮助）"
           >
             <img className="title-icon" src="icons/32x32.png" alt="" draggable={false} />
             <span className="title-name">Lexora</span>
-          </div>
+          </button>
           {brandMenuOpen && (
             <div className="brand-pop">
               <MenuBar groups={menuGroups} onItemAction={closeBrandMenu} />
@@ -1551,8 +1568,13 @@ export default function App() {
         />
         <div className="title-actions">
           {activePreviewKind != null && (
-            <button className="btn preview-btn" onClick={onPreview} title="预览（文件 → 预览 / Ctrl+P）">
-              ▶ 预览
+            <button
+              className="title-actions-preview"
+              onClick={onPreview}
+              title="预览（文件 → 预览 / Ctrl+P）"
+              aria-label="预览"
+            >
+              🔎
             </button>
           )}
           <button

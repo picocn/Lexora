@@ -1272,3 +1272,27 @@ body {
 .brand-pop .menu-panel {
   top: 100%;
 }
+
+/* brand as a real button */
+button.title-brand {
+  border: none;
+  background: transparent;
+  font: inherit;
+  color: inherit;
+}
+.title-actions-preview {
+  border: none;
+  background: transparent;
+  font-size: 15px;
+  line-height: 1;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.title-actions-preview:hover {
+  background: color-mix(in srgb, var(--fg, #333) 10%, transparent);
+}
