@@ -187,10 +187,6 @@ function startWindowDrag(e: ReactMouseEvent): void {
   void withMainWindow((w) => w.startDragging());
 }
 
-function toggleWindowMaximized(): void {
-  void withMainWindow((w) => w.toggleMaximize());
-}
-
 function minimizeWindow(): void {
   void withMainWindow((w) => w.minimize());
 }
@@ -209,6 +205,42 @@ export default function App() {
   const [replaceConfirmCount, setReplaceConfirmCount] = useState<number | null>(null);
   /** L1: pending confirmation for opening a file above LARGE_FILE_WARN_BYTES. */
   const [bigFileAsk, setBigFileAsk] = useState<{ path: string; read: FileReadResult } | null>(null);
+  /** Whether the main window is currently maximized (caption button glyph). */
+  const [winMaximized, setWinMaximized] = useState(false);
+
+  const refreshMaximized = useCallback(async () => {
+    const v = await withMainWindow((w) => w.isMaximized());
+    if (v !== undefined) setWinMaximized(v);
+  }, []);
+
+  /** Track maximize state (caption buttons / double click) so the correct
+   * 最大化/还原 glyph shows, including maximize via Aero-snap. */
+  useEffect(() => {
+    let disposed = false;
+    let un: (() => void) | null = null;
+    void (async () => {
+      try {
+        const { getCurrentWindow } = await import("@tauri-apps/api/window");
+        const win = getCurrentWindow();
+        if (!disposed) await refreshMaximized();
+        un = await win.onResized(() => {
+          if (!disposed) void refreshMaximized();
+        });
+      } catch {
+        /* browser preview */
+      }
+    })();
+    return () => {
+      disposed = true;
+      un?.();
+    };
+  }, [refreshMaximized]);
+
+  const onToggleMaximize = useCallback(async () => {
+    await withMainWindow((w) => w.toggleMaximize());
+    // isMaximized right after toggling can lag one frame; refresh shortly after.
+    window.setTimeout(() => void refreshMaximized(), 120);
+  }, [refreshMaximized]);
 
   /** Notices with autoHideMs > 0 dismiss themselves after that time, but only
    * when the currently shown notice is still the same text (a later notice of
@@ -1474,7 +1506,7 @@ export default function App() {
         <div
           className="title-brand"
           onMouseDown={startWindowDrag}
-          onDoubleClick={toggleWindowMaximized}
+          onDoubleClick={() => void onToggleMaximize()}
           title="双击最大化/还原"
         >
           <img className="title-icon" src="icons/32x32.png" alt="" draggable={false} />
@@ -1483,18 +1515,38 @@ export default function App() {
         <div className="title-menus">
           <MenuBar groups={menuGroups} />
         </div>
-        <div className="title-spacer" onMouseDown={startWindowDrag} onDoubleClick={toggleWindowMaximized} />
+        <div
+          className="title-spacer"
+          onMouseDown={startWindowDrag}
+          onDoubleClick={() => void onToggleMaximize()}
+        />
         <div className="title-controls">
-          <button className="title-btn" aria-label="最小化" title="最小化" onClick={() => void minimizeWindow()}>
-            &#x2013;
+          <button
+            className="title-btn"
+            aria-label="最小化"
+            title="最小化"
+            onClick={() => void minimizeWindow()}
+          >
+            <svg className="cap-icon" width="12" height="12" viewBox="0 0 10 10" aria-hidden="true">
+              <path d="M0 5h10" stroke="currentColor" strokeWidth="1" />
+            </svg>
           </button>
           <button
             className="title-btn"
-            aria-label="最大化/还原"
-            title="最大化/还原"
-            onClick={() => void toggleWindowMaximized()}
+            aria-label={winMaximized ? "还原" : "最大化"}
+            title={winMaximized ? "还原" : "最大化"}
+            onClick={() => void onToggleMaximize()}
           >
-            &#x25A1;
+            {winMaximized ? (
+              <svg className="cap-icon" width="12" height="12" viewBox="0 0 10 10" aria-hidden="true">
+                <rect x="0.5" y="2.5" width="7" height="7" fill="var(--panel-bg)" stroke="currentColor" strokeWidth="1" />
+                <rect x="2.5" y="0.5" width="7" height="7" fill="none" stroke="currentColor" strokeWidth="1" />
+              </svg>
+            ) : (
+              <svg className="cap-icon" width="12" height="12" viewBox="0 0 10 10" aria-hidden="true">
+                <rect x="0.5" y="0.5" width="9" height="9" fill="none" stroke="currentColor" strokeWidth="1" />
+              </svg>
+            )}
           </button>
           <button
             className="title-btn title-close"
@@ -1502,7 +1554,9 @@ export default function App() {
             title="关闭"
             onClick={() => void requestQuit()}
           >
-            &#x2715;
+            <svg className="cap-icon" width="12" height="12" viewBox="0 0 10 10" aria-hidden="true">
+              <path d="M0.8 0.8 9.2 9.2 M9.2 0.8 0.8 9.2" stroke="currentColor" strokeWidth="1.1" />
+            </svg>
           </button>
         </div>
       </div>

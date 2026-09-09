@@ -4,7 +4,11 @@
 （0.1.9 → 0.2.0）。版本以 `src-tauri/tauri.conf.json` 为当前源，构建前用
 `node scripts/bump-version.mjs` 同步 package.json / Cargo.toml / 两个 lockfile。
 
-## 0.2.4（本轮）
+## 0.2.5（本轮）
+- 标题栏窗口按钮按 Edge 风格调整：46px 宽、整行高、矢量图标（12px）替换文本符号；
+  最大化/还原图标随窗口状态切换（含 Aero-snap）；悬停底色、关闭红 #c42b1c。
+
+## 0.2.4（HTML 预览）
 - 新能力：HTML(.html/.htm) 支持预览——与 Markdown 同一“▶ 预览”入口；采用
   iframe `sandbox` 沙箱静态渲染（禁脚本/表单/对象/顶层导航，文档内注入 CSP），
   本地相对图片内联 data URL，外链交系统浏览器；超 800 万字符同样禁用防 OOM。
