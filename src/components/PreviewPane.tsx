@@ -218,7 +218,16 @@ export const PreviewPane = forwardRef<PreviewPaneHandle, PreviewPaneProps>(
               host?.querySelectorAll<HTMLElement>("[id]") ?? document.querySelectorAll<HTMLElement>("[id]"),
             ).find((el) => normalizeAnchor(el.getAttribute("id") ?? "") === normalizeAnchor(id)) ??
             undefined;
-          found?.scrollIntoView({ behavior: "smooth", block: "start" });
+          // Deterministic jump: scroll the preview's own scroll container to
+          // the heading's offset. scrollIntoView can wander because several
+          // nested scroll containers compete for the scroll.
+          const container = el as HTMLElement | null;
+          if (found && container) {
+            const cRect = container.getBoundingClientRect();
+            const fRect = found.getBoundingClientRect();
+            const top = container.scrollTop + (fRect.top - cRect.top) - 8;
+            container.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
+          }
         }
       };
       el.addEventListener("click", onPreviewClick, true);
