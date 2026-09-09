@@ -36,6 +36,7 @@ import {
   ptToPx,
   benchTargets,
   processMemKb,
+  DEFAULT_SETTINGS,
 } from "./ipc/commands";
 import type { TabsState, Tab } from "./tabs/types";
 import { tabDirty, tabText, isPreview, isEditor } from "./tabs/types";
@@ -46,6 +47,7 @@ import {
   UNLOAD_BIG_CHARS,
   KEEP_LOADED_BIG,
   SESSION_SKIP_BYTES,
+  PREVIEW_MAX_CHARS,
 } from "./tabs/thresholds";
 import {
   languageForFile,
@@ -100,7 +102,7 @@ function resolveTheme(settings: AppSettings, imported: StoredThemeMap): Resolved
   return builtinTheme(settings.theme.id === "dark" ? "dark" : "light");
 }
 
-export function labelForName(name: string): string {
+function labelForName(name: string): string {
   const base = name.toLowerCase();
   if (/\.(md|markdown|mdown)$/.test(base)) return "Markdown";
   if (/\.ya?ml$/.test(base)) return "YAML";
@@ -184,7 +186,7 @@ export default function App() {
   const [tabsState, setTabsState] = useState<TabsState>(() => store.emptyState());
   const [importedThemes, setImportedThemes] = useState<StoredThemeMap>(loadStoredThemes);
   const [showSettings, setShowSettings] = useState(false);
-  const [confirmClose, setConfirmClose] = useState<{ tabId?: string; quit: boolean } | null>(null);
+  const [confirmClose, setConfirmClose] = useState<{ tabId: string } | null>(null);
   const [infoDialog, setInfoDialog] = useState<InfoKind | null>(null);
   const [autosaveText, setAutosaveText] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
@@ -242,21 +244,11 @@ export default function App() {
         const s = await readSettings();
         setSettings(s);
       } catch {
-        // Running outside the Tauri runtime (e.g. plain vite): use defaults.
+        // Running outside the Tauri runtime (e.g. plain vite): use defaults,
+        // with autosave disabled (no snapshot backend in the browser).
         setSettings({
-          autosave: { enabled: false, intervalSec: 5 },
-          editor: {
-            fontFamily: "Consolas, 'Courier New', 'Sarasa Mono SC', monospace",
-            fontSize: 15,
-            lineHeight: 1.6,
-            tabSize: 4,
-            wordWrap: false,
-            lineNumbers: true,
-          },
-          preview: { fontFamily: "system-ui, 'Microsoft YaHei', sans-serif", fontSize: 15 },
-          theme: { kind: "builtin", id: "light" },
-          layout: "edit",
-          recentFiles: [],
+          ...DEFAULT_SETTINGS,
+          autosave: { ...DEFAULT_SETTINGS.autosave, enabled: false },
         });
       }
     })();
@@ -351,8 +343,8 @@ export default function App() {
     }
   }, [saveSessionNow]);
 
-  /** 文件→退出 / 关窗入口：发起一次真实的关闭请求；拦截器自行判断是否需要
-   * 先弹“保存/不保存退出/取消”确认（无脏标签则直接放行）。 */
+  /** 文件→退出 / 关窗入口：发起一次真实关闭请求，拦截器按“先自动快照、后退出”
+   * 的统一流程处理（不弹保存询问）。 */
   const requestQuit = useCallback(async () => {
     try {
       const { getCurrentWindow } = await import("@tauri-apps/api/window");
@@ -363,23 +355,29 @@ export default function App() {
   }, []);
 
   // ---- derived config ---------------------------------------------------------
+  // Memoized on the *field objects actually consumed* (settings.theme /
+  // settings.editor), not on the whole settings identity - so updating only
+  // recentFiles or layout (every file open via pushRecent, F5 cycling) does
+  // NOT re-parse/re-apply the theme or editor prefs.
   const themeChoice: ResolvedTheme = useMemo(
     () => (settings ? resolveTheme(settings, importedThemes) : builtinTheme("light")),
-    [settings, importedThemes],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [settings?.theme, importedThemes],
   );
   const themeExt: Extension = themeChoice.cm;
   const palette = themeChoice.palette;
 
   const prefs: EditorPrefs = useMemo(
     () => ({
-      fontFamily: settings?.editor.fontFamily || "Consolas, monospace",
-      fontSize: settings?.editor.fontSize ?? 15,
-      lineHeight: settings?.editor.lineHeight ?? 1.6,
-      tabSize: settings?.editor.tabSize ?? 4,
-      wordWrap: settings?.editor.wordWrap ?? false,
-      lineNumbers: settings?.editor.lineNumbers ?? true,
+      fontFamily: settings?.editor.fontFamily || DEFAULT_SETTINGS.editor.fontFamily,
+      fontSize: settings?.editor.fontSize ?? DEFAULT_SETTINGS.editor.fontSize,
+      lineHeight: settings?.editor.lineHeight ?? DEFAULT_SETTINGS.editor.lineHeight,
+      tabSize: settings?.editor.tabSize ?? DEFAULT_SETTINGS.editor.tabSize,
+      wordWrap: settings?.editor.wordWrap ?? DEFAULT_SETTINGS.editor.wordWrap,
+      lineNumbers: settings?.editor.lineNumbers ?? DEFAULT_SETTINGS.editor.lineNumbers,
     }),
-    [settings],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [settings?.editor],
   );
 
   // Apply theme / prefs changes to all open tab states.
@@ -643,7 +641,7 @@ export default function App() {
     (tabId: string) => {
       const tab = store.getTab(tabsRef.current, tabId);
       if (!tab) return;
-      if (isEditor(tab) && tabDirty(tab)) setConfirmClose({ tabId, quit: false });
+      if (isEditor(tab) && tabDirty(tab)) setConfirmClose({ tabId });
       else {
         // Closing a clean tab: drop any stale recovery snapshot so content the
         // user undid (or emptied) can't resurrect on the next launch.
@@ -700,18 +698,14 @@ export default function App() {
       const c = confirmClose;
       if (!c) return;
       setConfirmClose(null);
-      if (c.quit) return; // quit never prompts anymore (see close handler)
-
       // ---- closing one tab ----
-      const id = c.tabId;
-      if (!id) return;
       if (saveFirst) {
-        const ok = await saveTabById(id, false);
+        const ok = await saveTabById(c.tabId, false);
         if (!ok) return;
-        setTabsState((prev) => store.closeTab(prev, id));
+        setTabsState((prev) => store.closeTab(prev, c.tabId));
       } else {
         // 不保存并关闭：删除该标签快照后关闭。
-        await doDiscardAndClose([id]);
+        await doDiscardAndClose([c.tabId]);
       }
     },
     [confirmClose, saveTabById, doDiscardAndClose],
@@ -1333,15 +1327,27 @@ export default function App() {
     "--status-bg": palette.statusBg,
   } as CSSProperties;
 
-  // Content shown by a preview tab = its source editor text.
-  const previewText = useMemo(() => {
-    if (!activeTab) return "";
-    if (isPreview(activeTab)) {
-      const source = activeTab.model.sourceTabId ? store.getTab(tabsState, activeTab.model.sourceTabId) : undefined;
-      return source && isEditor(source) ? tabText(source) : "";
-    }
-    return tabText(activeTab);
-  }, [activeTab, tabsState]);
+  // A preview pane is only mounted when the active view is a preview tab, or
+  // the active editor is shown in split/preview layout. Only then do we
+  // materialize the source text - never in plain edit layout, and never as a
+  // full copy when the document exceeds the preview limit (PreviewPane then
+  // shows the "预览已禁用" notice via overLimitChars).
+  const previewVisible =
+    activeIsPreviewTab ||
+    Boolean(activeTab && isEditor(activeTab) && layout !== "edit");
+  const previewPayload = useMemo(() => {
+    if (!previewVisible || !activeTab) return null;
+    const source = isPreview(activeTab)
+      ? activeTab.model.sourceTabId
+        ? store.getTab(tabsState, activeTab.model.sourceTabId)
+        : undefined
+      : activeTab;
+    if (!source || !isEditor(source)) return null;
+    const len = source.cmState.doc.length;
+    if (len > PREVIEW_MAX_CHARS) return { text: "", overLimitChars: len };
+    return { text: tabText(source), overLimitChars: 0 };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [previewVisible, activeTab, tabsState]);
 
   /** Path of the markdown document being previewed (for relative images). */
   const previewBasePath = useMemo(() => {
@@ -1353,8 +1359,8 @@ export default function App() {
     return activeTab.model.path;
   }, [activeTab, tabsState]);
 
-  const previewFontFamily = settings?.preview.fontFamily ?? "system-ui, sans-serif";
-  const previewFontSize = settings?.preview.fontSize ?? 15;
+  const previewFontFamily = settings?.preview.fontFamily ?? DEFAULT_SETTINGS.preview.fontFamily;
+  const previewFontSize = settings?.preview.fontSize ?? DEFAULT_SETTINGS.preview.fontSize;
 
   const activeLanguage = activeTab
     ? isPreview(activeTab)
@@ -1379,7 +1385,8 @@ export default function App() {
     workbench = (
       <div className="preview-full">
         <PreviewPane
-          text={previewText}
+          text={previewPayload?.text ?? ""}
+          overLimitChars={previewPayload?.overLimitChars}
           basePath={previewBasePath}
           fontFamily={previewFontFamily}
           fontSize={previewFontSize}
@@ -1392,7 +1399,8 @@ export default function App() {
     workbench = (
       <div className="preview-pane-wrap">
         <PreviewPane
-          text={previewText}
+          text={previewPayload?.text ?? ""}
+          overLimitChars={previewPayload?.overLimitChars}
           basePath={previewBasePath}
           fontFamily={previewFontFamily}
           fontSize={previewFontSize}
@@ -1415,7 +1423,8 @@ export default function App() {
         <div className="preview-pane-wrap">
           <PreviewPane
             ref={previewHandleRef}
-            text={previewText}
+            text={previewPayload?.text ?? ""}
+          overLimitChars={previewPayload?.overLimitChars}
             basePath={previewBasePath}
             fontFamily={previewFontFamily}
             fontSize={previewFontSize}
@@ -1528,11 +1537,9 @@ export default function App() {
 
       {infoDialog && <InfoDialog kind={infoDialog} onClose={() => setInfoDialog(null)} />}
 
-      {confirmClose && !confirmClose.quit && (
+      {confirmClose && (
         <CloseConfirm
-          kind="close-tab"
-          count={1}
-          titles={[store.getTab(tabsState, confirmClose.tabId!)?.model.title ?? "当前文件"]}
+          title={store.getTab(tabsState, confirmClose.tabId)?.model.title ?? "当前文件"}
           onSave={() => void resolveClose(true)}
           onDiscard={() => void resolveClose(false)}
           onCancel={() => setConfirmClose(null)}

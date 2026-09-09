@@ -3,7 +3,7 @@ import type { TabsState, Tab, TabModel } from "./types";
 import { tabDirty, isPreview, isEditor } from "./types";
 import { createEditorState, prefsExtension, type EditorPrefs } from "../editor/cmCore";
 
-export function basename(p: string): string {
+function basename(p: string): string {
   const i = Math.max(p.lastIndexOf("/"), p.lastIndexOf("\\"));
   return i >= 0 ? p.slice(i + 1) : p;
 }
@@ -86,7 +86,15 @@ export function unloadBigTab(
         theme: opts.theme,
         prefs: opts.prefs,
       });
-      return { ...t, cmState, comps, langExt: null, lastSnapshotContent: null, unloaded: true };
+      return {
+        ...t,
+        model: { ...t.model, diskContent: "" },
+        cmState,
+        comps,
+        langExt: null,
+        lastSnapshotContent: null,
+        unloaded: true,
+      };
     }),
   };
 }

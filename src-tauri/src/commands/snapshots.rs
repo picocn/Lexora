@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
+use std::io::Read;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::AppHandle;
 
@@ -68,7 +69,7 @@ fn sanitize_stem(raw: &str) -> String {
 
 /// Writes (or refreshes) one autosave snapshot: `<key>.md` + `<key>.meta.json`.
 #[tauri::command]
-pub fn snapshot_write(
+pub async fn snapshot_write(
     app: AppHandle,
     doc_key: String,
     content: String,
@@ -96,7 +97,7 @@ pub fn snapshot_write(
 
 /// Lists all snapshots for the startup recovery dialog.
 #[tauri::command]
-pub fn snapshot_list(app: AppHandle) -> Result<Vec<SnapshotInfo>, String> {
+pub async fn snapshot_list(app: AppHandle) -> Result<Vec<SnapshotInfo>, String> {
     let dir = match snapshots_dir(&app) {
         Ok(d) => d,
         Err(_) => return Ok(Vec::new()),
@@ -125,10 +126,17 @@ pub fn snapshot_list(app: AppHandle) -> Result<Vec<SnapshotInfo>, String> {
             .ok()
             .and_then(|raw| serde_json::from_str(&raw).ok());
         let content_path = dir.join(format!("{stem}.md"));
-        let snippet = fs::read_to_string(&content_path)
+        // Only read the file head - snapshots can be ~100MB and we only need a
+        // short preview snippet (bounded read, no whole-file copy).
+        let snippet = fs::File::open(&content_path)
             .ok()
-            .map(|c| {
-                let flat: String = c.chars().take(120).collect();
+            .and_then(|mut f| {
+                let mut buf = [0u8; 2048];
+                let n = f.read(&mut buf).ok()?;
+                Some(String::from_utf8_lossy(&buf[..n]).into_owned())
+            })
+            .map(|s| {
+                let flat: String = s.chars().take(120).collect();
                 flat.replace(['\n', '\r'], " ")
             })
             .unwrap_or_default();
@@ -208,9 +216,9 @@ pub struct SnapshotContent {
     pub modified_at_ms: u64,
 }
 
-/// Reads one snapshot's full content + metadata (used by the recovery dialog).
+/// Reads one snapshot's full content + metadata (used by recovery).
 #[tauri::command]
-pub fn snapshot_read(app: AppHandle, key: String) -> Result<SnapshotContent, String> {
+pub async fn snapshot_read(app: AppHandle, key: String) -> Result<SnapshotContent, String> {
     let dir = match snapshots_dir(&app) {
         Ok(d) => d,
         Err(_) => return Err("快照目录不可用".into()),
@@ -219,9 +227,19 @@ pub fn snapshot_read(app: AppHandle, key: String) -> Result<SnapshotContent, Str
     let content = fs::read_to_string(dir.join(format!("{stem}.md")))
         .map_err(|e| format!("无法读取快照内容：{e}"))?;
     let meta_path = dir.join(format!("{stem}.meta.json"));
-    let meta: Option<SnapshotMeta> = fs::read_to_string(&meta_path)
+    let mut meta: Option<SnapshotMeta> = fs::read_to_string(&meta_path)
         .ok()
         .and_then(|raw| serde_json::from_str(&raw).ok());
+    // Trust check: the meta's originalPath must hash back to this snapshot's
+    // own stem. A planted/mismatched meta (portable world-writable autosave
+    // dir) must never make recovery reopen content anchored to an arbitrary
+    // file that a later Ctrl+S would overwrite.
+    if let Some(m) = meta.as_mut() {
+        let mismatch = matches!(&m.original_path, Some(op) if sanitize_stem(op) != stem);
+        if mismatch {
+            m.original_path = None;
+        }
+    }
     Ok(SnapshotContent {
         content,
         original_path: meta.as_ref().and_then(|m| m.original_path.clone()),

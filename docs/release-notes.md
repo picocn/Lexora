@@ -1,0 +1,45 @@
+# Lexora 发布说明（Release Notes）
+
+版本方案：`<major>.<minor>.<micro>`；每次发布递增 micro，micro 到 10 时归零并 minor+1
+（0.1.9 → 0.2.0）。版本以 `src-tauri/tauri.conf.json` 为当前源，构建前用
+`node scripts/bump-version.mjs` 同步 package.json / Cargo.toml / 两个 lockfile。
+
+## 0.2.3（本轮：专项审查修订）
+- 审查：安全 / 性能 / 死代码 三路审计并修订。
+- 安全：预览 http(s) 链接改由系统浏览器打开（不再整窗导航）；生产 CSP 收紧
+  （去掉 http 图片与多余 connect-src，补 object-src/base-uri/form-action）；
+  导入主题颜色与字体样式值白名单校验（防 CSS 注入）；文件读取加“常规文件 +
+  大小预检”；快照恢复校验 meta.originalPath 归属。
+- 性能：tabDirty 长度先行（避免每键整文档拷贝）；主题/编辑器配置按字段 memo
+  （打开文件/F5 不再无谓重配置全部标签）；预览文本仅在预览布局下、且不超上限时
+  才物化；本地图片 data URL 缓存；卸载占位标签同时释放 diskContent；Rust 文件/
+  快照命令 async 化（不阻塞主线程）；快照列表只读文件头生成摘要；EditorHost 仅
+  在真正切换时恢复滚动。
+- 死代码/卫生：删除残留的“退出确认”机制（CloseConfirm 收敛为单标签关闭确认）；
+  清理未使用的导出（cmCore/themes/render/store/App/imagePath）、过时注释、clippy
+  提示等。
+
+## 0.2.2
+- 修复：超 800 万字符文档预览直接禁用并提示（杜绝 100MB md 预览 OOM）。
+
+## 0.2.1
+- 性能：超大标签打开前“预卸载”，常驻上限更平稳（见 docs/large-file-strategy.zh.md）。
+
+## 0.2.0
+- 大文件 L1/L2/L3：&gt;20MB 打开确认并后台打开；会话恢复跳过 ≥64MB；超大干净标签
+  常驻上限 4 个、自动卸载并在激活时原地重载；附性能方案文档。
+
+## 0.1.x 要点（历史）
+- 0.1.9：标签栏改造（无滚动条，‹ › 循环切换 + ＋ 新建）。
+- 0.1.8：帮助 → 许可证…（MIT 全文 + 第三方清单）；状态栏配色改用 statusBg
+  （导入主题不再强制蓝）；退出改“自动快照后退出，不再询问”。
+- 0.1.7：退出静默快照；恢复提示 5 秒自动隐藏。
+- 0.1.6：启动恢复与设置加载竞态修复；导入主题 token 颜色生效；快照清理等。
+- 0.1.5：自绘标题栏（图标 + 菜单同排 + 窗口按钮）。
+- 0.1.4：导入主题可删除。
+- 0.1.3：编辑菜单 查找/替换 + 面板中文。
+- 0.1.2：代码审查加固（原子写、编码保护、CSP、去 asset 协议等）。
+- 0.1.1：mdpad → Lexora；预览支持 LaTeX / Mermaid / 本地图片。
+
+详细功能与设计见 `docs/requirements.zh.md`、`docs/design.zh.md`；
+人工验收清单见 `docs/acceptance.zh.md`。

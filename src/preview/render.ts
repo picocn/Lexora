@@ -3,7 +3,7 @@ import hljs from "highlight.js/lib/common";
 import katex from "katex";
 import texmath from "markdown-it-texmath";
 
-export const md: MarkdownIt = new MarkdownIt({
+const md: MarkdownIt = new MarkdownIt({
   html: false, // security: never render raw HTML from the edited document
   linkify: true,
   breaks: false,
@@ -31,6 +31,23 @@ md.use(texmath, {
 });
 
 md.enable(["table", "strikethrough"]);
+
+// External links: open in a new context and never let the preview navigate
+// the whole app window. Click interception in PreviewPane routes them to the
+// OS browser; target/rel here are defense in depth.
+{
+  const prevLinkOpen = md.renderer.rules.link_open;
+  md.renderer.rules.link_open = (tokens, idx, options, env, self) => {
+    const href = tokens[idx].attrGet("href") ?? "";
+    if (/^https?:\/\//i.test(href)) {
+      tokens[idx].attrSet("target", "_blank");
+      tokens[idx].attrSet("rel", "noopener noreferrer");
+    }
+    return prevLinkOpen
+      ? prevLinkOpen(tokens, idx, options, env, self)
+      : self.renderToken(tokens, idx, options);
+  };
+}
 
 // Task lists: convert list-item text that starts with "[ ]"/"[x]".
 md.core.ruler.after("inline", "task-lists", (state) => {

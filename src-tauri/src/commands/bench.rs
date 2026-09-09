@@ -2,7 +2,6 @@
 //! `settings/bench-targets.json` next to the executable; never enabled by
 //! normal usage). Used to measure open-time + memory while opening many
 //! large markdown files.
-#![cfg(windows)]
 
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -22,7 +21,7 @@ pub struct BenchTargets {
 /// an error (the frontend treats any error as "bench disabled").
 #[tauri::command]
 pub fn bench_targets(app: AppHandle) -> Result<BenchTargets, String> {
-    let dir = paths::settings_dir(&app).map_err(|e| e)?;
+    let dir = paths::settings_dir(&app)?;
     let path = dir.join("bench-targets.json");
     if !path.exists() {
         return Err("__no_bench_targets__".into());

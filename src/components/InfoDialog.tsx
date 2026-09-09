@@ -84,13 +84,14 @@ const CONTENT: Record<InfoKind, { title: string; body: React.ReactNode }> = {
       <div className="info-body">
         <h3>v{__APP_VERSION__}</h3>
         <ul>
-          <li>CodeMirror 6 多标签编辑，按扩展名自动语法高亮（md/yml/toml/html/css/js/ts/json/rust/python 等），支持手动指定语言。</li>
-          <li>定时自动保存仅写入恢复快照，原文件只由手动保存覆盖；启动提供快照恢复。</li>
-          <li>Markdown 实时预览标签页（xxx-预览），GFM 表格 / 删除线 / 任务列表，内嵌 HTML 不渲染（安全）。</li>
-          <li>内置浅色/深色主题，支持导入 VS Code 主题 JSON（导入的主题可在设置中删除）。</li>
-          <li>字体 / 字号 / 行高 / 布局等设置持久化。</li>
+          <li>CodeMirror 6 多标签编辑，按扩展名自动语法高亮（md/yml/toml/html/css/js/ts/json/rust/python 等），支持手动指定语言；标签栏 ‹ › 切换 + 「＋」新建。</li>
+          <li>定时自动保存仅写入恢复快照，原文件只由手动保存覆盖；启动自动恢复；退出不弹保存询问，自动为未保存标签补写快照后退出。</li>
+          <li>Markdown 实时预览（xxx-预览 / 分屏 / 仅预览），GFM 表格 / 任务列表、LaTeX（KaTeX）、Mermaid、本地图片；超 800 万字符自动禁用预览防 OOM。</li>
+          <li>查找/替换（Ctrl+F 面板，全部替换前确认数量）；大文件护栏：&gt;20MB 打开确认、后台打开、超大标签驻留上限与自动重载。</li>
+          <li>内置浅/深主题，支持导入/删除 VS Code 主题 JSON；状态栏配色跟随主题（不再强制蓝）。</li>
+          <li>字体 / 字号 / 行高 / 布局等设置持久化；编码：UTF-8 读写（含 BOM），UTF-16/32 提示转存，非 UTF-8 禁止原地覆盖。</li>
+          <li>安全加固：生产 CSP、外部链接交给系统浏览器、导入主题颜色白名单、文件读取常规文件与大小预检。</li>
         </ul>
-        <p>编码：UTF-8（含 BOM）正常读写；UTF-16/32 文件会提示先转存 UTF-8；其他非 UTF-8 编码尽力解码显示，但不允许原地覆盖（请用“另存为”转存）。预览不执行脚本。</p>
       </div>
     ),
   },

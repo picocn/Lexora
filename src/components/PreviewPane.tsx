@@ -9,8 +9,31 @@ import {
 import { renderMarkdown } from "../preview/render";
 import { renderMermaidIn } from "../preview/mermaid";
 import { dirnameOf, resolveLocalImageSrc } from "../preview/imagePath";
-import { readImageBase64 } from "../ipc/commands";
+import { readImageBase64, openExternal } from "../ipc/commands";
 import { PREVIEW_MAX_CHARS } from "../tabs/thresholds";
+
+/** Cache of resolved local image data URLs (path -> data URL). Images do not
+ * change within a session; without this the 300ms-debounced re-render would
+ * IPC-read + base64-encode every local image on every keystroke. */
+const imageDataUrlCache = new Map<string, string>();
+const IMAGE_CACHE_MAX = 128;
+function cachedImageDataUrl(path: string, mime: string): Promise<string> {
+  const hit = imageDataUrlCache.get(path);
+  if (hit) return Promise.resolve(hit);
+  return readImageBase64(path)
+    .then((b64) => {
+      const url = `data:${mime};base64,${b64}`;
+      if (imageDataUrlCache.size >= IMAGE_CACHE_MAX) {
+        const oldest = imageDataUrlCache.keys().next().value;
+        if (oldest !== undefined) imageDataUrlCache.delete(oldest);
+      }
+      imageDataUrlCache.set(path, url);
+      return url;
+    })
+    .catch((e) => {
+      throw e;
+    });
+}
 
 export interface PreviewPaneHandle {
   /** Scroll the preview so the markdown source line appears near the top. */
@@ -19,6 +42,9 @@ export interface PreviewPaneHandle {
 
 export interface PreviewPaneProps {
   text: string;
+  /** When the doc exceeds the preview limit the caller passes "" as text and
+   * reports the real character count here; we show the disabled notice. */
+  overLimitChars?: number;
   fontFamily: string;
   fontSize: number;
   /** Chroma variables (bg/fg/...). */
@@ -35,12 +61,18 @@ export interface PreviewPaneProps {
  * split-view scroll sync. */
 export const PreviewPane = forwardRef<PreviewPaneHandle, PreviewPaneProps>(
   function PreviewPane(
-    { text, fontFamily, fontSize, vars, debounceMs = 300, basePath, onPreviewScroll },
+    { text, overLimitChars, fontFamily, fontSize, vars, debounceMs = 300, basePath, onPreviewScroll },
     ref,
   ) {
     // Whole-document markdown rendering of extremely large docs OOMs the
     // webview; above the limit we show a notice instead of rendering.
-    const overLimit = text.length > PREVIEW_MAX_CHARS;
+    const limitChars =
+      overLimitChars && overLimitChars > 0
+        ? overLimitChars
+        : text.length > PREVIEW_MAX_CHARS
+          ? text.length
+          : 0;
+    const overLimit = limitChars > 0;
     const [html, setHtml] = useState(() =>
       overLimit ? "" : renderMarkdown(text),
     );
@@ -51,7 +83,7 @@ export const PreviewPane = forwardRef<PreviewPaneHandle, PreviewPaneProps>(
     const suppressRef = useRef(false);
 
     useEffect(() => {
-      if (text.length > PREVIEW_MAX_CHARS) {
+      if (limitChars > 0) {
         if (timer.current) window.clearTimeout(timer.current);
         timer.current = null;
         setHtml("");
@@ -64,7 +96,7 @@ export const PreviewPane = forwardRef<PreviewPaneHandle, PreviewPaneProps>(
       return () => {
         if (timer.current) window.clearTimeout(timer.current);
       };
-    }, [text, debounceMs]);
+    }, [text, debounceMs, limitChars]);
 
     // After every HTML refresh: render mermaid diagrams and fix up local image
     // srcs (relative paths resolve against the document's folder; absolute
@@ -84,10 +116,29 @@ export const PreviewPane = forwardRef<PreviewPaneHandle, PreviewPaneProps>(
       };
     }, [html, basePath]);
 
+    // Click interception: external http(s) links must never navigate the app
+    // webview (window hijack / session loss) - route them to the OS browser.
+    useEffect(() => {
+      const el = scrollRef.current;
+      if (!el) return;
+      const onPreviewClick = (e: MouseEvent) => {
+        const target = e.target as HTMLElement | null;
+        const anchor = target?.closest<HTMLAnchorElement>("a[href]");
+        if (!anchor) return;
+        const href = anchor.getAttribute("href") ?? "";
+        if (/^https?:\/\//i.test(href)) {
+          e.preventDefault();
+          e.stopPropagation();
+          void openExternal(href).catch(() => {});
+        }
+      };
+      el.addEventListener("click", onPreviewClick, true);
+      return () => el.removeEventListener("click", onPreviewClick, true);
+    }, []);
+
     // Report the source line near the top of the preview viewport while
     // the user scrolls (throttled via rAF).
-    const rafRef = useRef<number | null>(null);
-    useEffect(() => {
+    const rafRef = useRef<number | null>(null);    useEffect(() => {
       const el = scrollRef.current;
       if (!el) return;
       const report = () => {
@@ -125,7 +176,7 @@ export const PreviewPane = forwardRef<PreviewPaneHandle, PreviewPaneProps>(
     }));
 
     if (overLimit) {
-      const wan = Math.ceil(text.length / 10000);
+      const wan = Math.ceil(limitChars / 10000);
       return (
         <div className="preview-scroll" ref={scrollRef}>
           <div
@@ -231,8 +282,7 @@ async function fixupImages(container: HTMLElement, basePath: string | null): Pro
     if (!local) continue; // remote/data URLs render natively
     try {
       const mime = mimeOfPath(local);
-      const b64 = await readImageBase64(local);
-      img.src = `data:${mime};base64,${b64}`;
+      img.src = await cachedImageDataUrl(local, mime);
       img.onerror = () => {
         img.onerror = null;
         img.setAttribute("title", `无法加载图片：${src}`);

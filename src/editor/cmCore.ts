@@ -26,20 +26,20 @@ export interface EditorPrefs {
   lineNumbers: boolean;
 }
 
-export interface TabCompartments {
+interface TabCompartments {
   lang: Compartment;
   theme: Compartment;
   prefs: Compartment;
 }
 
-export interface CreatedState {
+interface CreatedState {
   state: EditorState;
   comps: TabCompartments;
 }
 
 /** Chinese translations for CodeMirror's built-in panel UI (search/replace
  * panel, a11y announcements). Keys are the exact English source strings. */
-export const CM_PHRASES: Record<string, string> = {
+const CM_PHRASES: Record<string, string> = {
   Find: "查找",
   Replace: "替换",
   next: "下一个",
@@ -58,7 +58,7 @@ export const CM_PHRASES: Record<string, string> = {
   go: "跳转",
 };
 
-export const baseExtensions: Extension[] = [
+const baseExtensions: Extension[] = [
   drawSelection(),
   highlightActiveLine(),
   highlightActiveLineGutter(),
@@ -70,21 +70,34 @@ export const baseExtensions: Extension[] = [
 ];
 
 /** Optional per-tab: undo/redo history (skipped for very large documents). */
-export function historyExtension(noHistory: boolean): Extension[] {
+function historyExtension(noHistory: boolean): Extension[] {
   return noHistory ? [] : [history(), keymap.of(historyKeymap)];
 }
 
+/** Restricts a font-family stack to characters safe for CSS (quotes/letters/
+ * digits/commas/hyphens) and caps its length. The value reaches CodeMirror's
+ * document-head stylesheet via style-mod (unescaped), so hostile input must
+ * not be able to break out of the value. */
+function safeFontStack(stack: string): string {
+  const clean = stack.replace(/[^A-Za-z0-9 ,'"/-]/g, "").slice(0, 200);
+  return clean.length > 0 ? clean : "monospace";
+}
+
 export function prefsExtension(prefs: EditorPrefs): Extension {
+  // Clamp numeric prefs regardless of where they came from (settings file).
+  const fontSize = Math.min(400, Math.max(6, Math.round(prefs.fontSize)));
+  const lineHeight = Math.min(10, Math.max(1, prefs.lineHeight));
+  const tabSize = Math.min(16, Math.max(1, Math.round(prefs.tabSize)));
   return [
     EditorView.theme({
       "&": {
-        fontFamily: prefs.fontFamily,
-        fontSize: `${prefs.fontSize}px`,
-        lineHeight: `${prefs.lineHeight}`,
+        fontFamily: safeFontStack(prefs.fontFamily),
+        fontSize: `${fontSize}px`,
+        lineHeight: `${lineHeight}`,
       },
       ".cm-content": { caretColor: "currentColor" },
     }),
-    EditorState.tabSize.of(prefs.tabSize),
+    EditorState.tabSize.of(tabSize),
     prefs.wordWrap ? EditorView.lineWrapping : [],
     prefs.lineNumbers ? lineNumbers() : [],
   ];

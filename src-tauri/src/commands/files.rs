@@ -6,6 +6,9 @@ use crate::paths;
 
 /// Rejects absurdly large "images" before they are read into memory.
 const MAX_IMAGE_BYTES: u64 = 40 * 1024 * 1024;
+/// Hard ceiling for any text file read (beyond this the frontend's own 20/64MB
+/// policies can't protect us - refuse up-front instead of OOMing on fs::read).
+const MAX_TEXT_BYTES: u64 = 512 * 1024 * 1024;
 
 const BASE64_CHARS: &[u8; 64] =
     b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -27,15 +30,23 @@ fn base64_encode(bytes: &[u8]) -> String {
 
 /// Reads a local image file and returns its base64 payload (no mime prefix),
 /// so the frontend can build a data: URL. Bypasses the asset protocol so
-/// paths containing CJK/spaces/any characters work reliably. Size-capped so a
-/// hostile document can't force unbounded memory use.
+/// paths containing CJK/spaces/any characters work reliably. Size-capped and
+/// regular-file gated so hostile references cannot block a worker or force
+/// unbounded memory use.
 #[tauri::command]
-pub fn read_image_base64(path: String) -> Result<String, String> {
-    let meta = fs::metadata(&path).map_err(|e| format!("无法读取图片：{e}"))?;
+pub async fn read_image_base64(path: String) -> Result<String, String> {
+    read_image_base64_impl(&path)
+}
+
+fn read_image_base64_impl(path: &str) -> Result<String, String> {
+    let meta = fs::metadata(path).map_err(|e| format!("无法读取图片：{e}"))?;
+    if !meta.file_type().is_file() {
+        return Err("不是常规文件，无法读取图片".to_string());
+    }
     if meta.len() > MAX_IMAGE_BYTES {
         return Err("图片文件过大（超过 40 MB）".to_string());
     }
-    let bytes = fs::read(&path).map_err(|e| format!("无法读取图片：{e}"))?;
+    let bytes = fs::read(path).map_err(|e| format!("无法读取图片：{e}"))?;
     Ok(base64_encode(&bytes))
 }
 
@@ -64,8 +75,19 @@ const UTF16_BE_BOM: &[u8] = &[0xFE, 0xFF];
 /// encodings decode lossily and report `utf8_ok == false` so the frontend can
 /// refuse to overwrite the original without explicit user action (另存为).
 #[tauri::command]
-pub fn read_text_file(path: String) -> Result<FileReadResult, String> {
-    let bytes = fs::read(&path).map_err(|e| format!("无法读取文件：{e}"))?;
+pub async fn read_text_file(path: String) -> Result<FileReadResult, String> {
+    read_text_file_impl(&path)
+}
+
+fn read_text_file_impl(path: &str) -> Result<FileReadResult, String> {
+    let meta = fs::metadata(path).map_err(|e| format!("无法读取文件：{e}"))?;
+    if !meta.file_type().is_file() {
+        return Err("不是常规文件，无法读取".to_string());
+    }
+    if meta.len() > MAX_TEXT_BYTES {
+        return Err(format!("文件过大（超过 {} MB）", MAX_TEXT_BYTES / 1048576));
+    }
+    let bytes = fs::read(path).map_err(|e| format!("无法读取文件：{e}"))?;
     let (body, utf8_bom) = if bytes.starts_with(UTF8_BOM) {
         (&bytes[UTF8_BOM.len()..], true)
     } else if bytes.starts_with(UTF32_LE_BOM) || bytes.starts_with(UTF32_BE_BOM) {
@@ -91,9 +113,12 @@ pub fn read_text_file(path: String) -> Result<FileReadResult, String> {
 /// Autosave snapshots never call this. Writes atomically so a crash mid-save
 /// cannot truncate the original file.
 #[tauri::command]
-pub fn write_text_file(path: String, content: String) -> Result<(), String> {
-    paths::atomic_write_text(Path::new(&path), &content)
-        .map_err(|e| format!("无法写入文件：{e}"))
+pub async fn write_text_file(path: String, content: String) -> Result<(), String> {
+    write_text_file_impl(&path, &content)
+}
+
+fn write_text_file_impl(path: &str, content: &str) -> Result<(), String> {
+    paths::atomic_write_text(Path::new(path), content).map_err(|e| format!("无法写入文件：{e}"))
 }
 
 #[tauri::command]
@@ -143,7 +168,7 @@ mod tests {
         bytes.extend_from_slice("你好 world".as_bytes());
         fs::write(&p, &bytes).unwrap();
 
-        let r = read_text_file(p.to_string_lossy().into_owned()).unwrap();
+        let r = read_text_file_impl(&p.to_string_lossy()).unwrap();
         assert!(r.utf8_ok);
         assert!(r.utf8_bom);
         assert_eq!(r.content, "你好 world");
@@ -157,7 +182,7 @@ mod tests {
         let p = dir.join("gbk.md");
         // GBK bytes for 中文 - invalid as UTF-8.
         fs::write(&p, [0xD6, 0xD0, 0xCE, 0xC4]).unwrap();
-        let r = read_text_file(p.to_string_lossy().into_owned()).unwrap();
+        let r = read_text_file_impl(&p.to_string_lossy()).unwrap();
         assert!(!r.utf8_ok);
         assert!(!r.utf8_bom);
         let _ = fs::remove_dir_all(&dir);
@@ -170,11 +195,11 @@ mod tests {
         // UTF-16 LE with BOM.
         let p16 = dir.join("u16.md");
         fs::write(&p16, [0xFF, 0xFE, b'a', 0x00, b'b', 0x00]).unwrap();
-        assert!(read_text_file(p16.to_string_lossy().into_owned()).is_err());
+        assert!(read_text_file_impl(&p16.to_string_lossy()).is_err());
         // UTF-32 LE with BOM.
         let p32 = dir.join("u32.md");
         fs::write(&p32, [0xFF, 0xFE, 0x00, 0x00, b'a', 0x00, 0x00, 0x00]).unwrap();
-        assert!(read_text_file(p32.to_string_lossy().into_owned()).is_err());
+        assert!(read_text_file_impl(&p32.to_string_lossy()).is_err());
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -184,7 +209,7 @@ mod tests {
         fs::create_dir_all(&dir).unwrap();
         let p = dir.join("out.md");
         fs::write(&p, "old").unwrap();
-        write_text_file(p.to_string_lossy().into_owned(), "新的内容".into()).unwrap();
+        write_text_file_impl(&p.to_string_lossy(), "新的内容").unwrap();
         assert_eq!(fs::read_to_string(&p).unwrap(), "新的内容");
         // No temp leftovers.
         let leftovers: Vec<_> = fs::read_dir(&dir)

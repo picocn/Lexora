@@ -82,7 +82,13 @@ export function parseVscodeTheme(raw: unknown): ParsedVscodeTheme | null {
     if (!entry || typeof entry !== "object") continue;
     const e = entry as Record<string, unknown>;
     const settings = (e.settings ?? {}) as Record<string, unknown>;
-    const fg = typeof settings.foreground === "string" ? settings.foreground : null;
+    // Security: colors reach CodeMirror's document-head stylesheet through
+    // style-mod (unescaped), so only accept strict hex colors (with a length
+    // cap) - anything else is dropped instead of being injected.
+    const fg =
+      typeof settings.foreground === "string" && /^#[0-9a-fA-F]{3,8}$/.test(settings.foreground)
+        ? settings.foreground.slice(0, 32)
+        : null;
     if (!fg) continue;
     const scopeList = Array.isArray(e.scope)
       ? (e.scope as unknown[]).filter((s): s is string => typeof s === "string")

@@ -124,23 +124,29 @@ export function EditorHost({
     }
 
     const prevId = activeIdRef.current;
+    const swapped = prevId !== tab.model.id || view.state !== tab.cmState;
     if (prevId && prevId !== tab.model.id) {
       scrollMap.set(prevId, view.scrollDOM.scrollTop);
     }
-    if (view.state !== tab.cmState) {
-      view.setState(tab.cmState);
-      // view.setState replaces the whole state without an update event, so no
-      // cursor report is emitted by the per-tab listener: publish the new
-      // state's cursor manually (fresh tab would otherwise show a blank
-      // status bar until the first keystroke).
-      onCursorRef.current?.(tab.model.id, computeCursor(tab.cmState));
+    if (swapped) {
+      if (view.state !== tab.cmState) {
+        view.setState(tab.cmState);
+        // view.setState replaces the whole state without an update event, so no
+        // cursor report is emitted by the per-tab listener: publish the new
+        // state's cursor manually (fresh tab would otherwise show a blank
+        // status bar until the first keystroke).
+        onCursorRef.current?.(tab.model.id, computeCursor(tab.cmState));
+      }
+      activeIdRef.current = tab.model.id;
+      // Only restore the saved scroll offset when the tab/view actually
+      // changed; typing edits (same state instance) must not reset scroll.
+      const top = scrollMap.get(tab.model.id) ?? 0;
+      requestAnimationFrame(() => {
+        if (viewRef.current) viewRef.current.scrollDOM.scrollTop = top;
+      });
+    } else {
+      activeIdRef.current = tab.model.id;
     }
-    activeIdRef.current = tab.model.id;
-
-    const top = scrollMap.get(tab.model.id) ?? 0;
-    requestAnimationFrame(() => {
-      if (viewRef.current) viewRef.current.scrollDOM.scrollTop = top;
-    });
   }, [tab]);
 
   // Focus the editor whenever the mounted tab changes (first open or tab

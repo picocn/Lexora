@@ -62,10 +62,16 @@ export function isPreview(t: Tab): boolean {
 
 /** True when the current editor content differs from the disk anchor.
  * Preview tabs are never dirty; unloaded (placeholder) tabs are clean by
- * definition - they were only unloaded while content == disk. */
+ * definition - they were only unloaded while content == disk.
+ * Cost-sensitive: compares lengths first, so per-keystroke render paths
+ * (dirty dots, status bar, L3 capacity scans) never materialize the full
+ * document string unless lengths are equal. */
 export function tabDirty(tab: Tab): boolean {
   if (!isEditor(tab) || tab.unloaded) return false;
-  return tab.cmState.doc.toString() !== tab.model.diskContent;
+  const doc = tab.cmState.doc;
+  const disk = tab.model.diskContent;
+  if (doc.length !== disk.length) return true;
+  return doc.toString() !== disk;
 }
 
 /** Current editor text of a tab ("" for preview tabs). */

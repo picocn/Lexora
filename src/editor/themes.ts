@@ -28,7 +28,7 @@ export interface ResolvedTheme {
   palette: ThemePalette;
 }
 
-export function hexOr(c: string | undefined, fallback: string): string {
+function hexOr(c: string | undefined, fallback: string): string {
   return c && /^#[0-9a-fA-F]{3,8}$/.test(c) ? c : fallback;
 }
 
@@ -169,9 +169,10 @@ export function themeFromVscode(parsed: ParsedVscodeTheme): ResolvedTheme {
   const colors = parsed.colors;
   const bg = hexOr(colors["editor.background"], parsed.dark ? "#1e1e1e" : "#ffffff");
   const fg = hexOr(colors["editor.foreground"], parsed.dark ? "#d4d4d4" : "#1f1f1f");
-  const selBg =
-    colors["editor.selectionBackground"] ??
-    (parsed.dark ? toRgba("#264f78", 0.5) : toRgba("#add6ff", 0.6));
+  const selFallback = parsed.dark ? toRgba("#264f78", 0.5) : toRgba("#add6ff", 0.6);
+  // selectionBackground was previously used raw; route it through hexOr so an
+  // exotic value can never reach the stylesheet (CSS injection).
+  const selBg = hexOr(colors["editor.selectionBackground"], selFallback);
   const lineBg = hexOr(colors["editor.lineHighlightBackground"], "transparent");
   const gutterBg = hexOr(colors["editorGutter.background"], "transparent");
   const gutterFg = hexOr(colors["editorLineNumber.foreground"], parsed.dark ? "#858585" : "#237893");
@@ -215,5 +216,3 @@ export function themeFromVscode(parsed: ParsedVscodeTheme): ResolvedTheme {
     palette,
   };
 }
-
-export { toRgba };

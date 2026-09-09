@@ -2,14 +2,30 @@ mod commands;
 mod paths;
 mod window_state;
 
-/** Force-quits the whole app from the frontend (used after the quit
- * confirm dialog, bypassing close-requested interception entirely).
- * Persists the window geometry first, since app.exit() skips the normal
- * CloseRequested/Destroyed event chain. */
+/** Force-quits the whole app from the frontend. Called from the window
+ * close-request interceptor after session + snapshot sync; bypasses the
+ * (already consumed) close request. Persists window geometry first, since
+ * app.exit() skips the normal CloseRequested/Destroyed event chain. */
 #[tauri::command]
 fn exit_app(app: tauri::AppHandle) {
     window_state::save_now(&app);
     app.exit(0);
+}
+
+/// Opens an http(s) URL in the OS default browser. Preview links are never
+/// navigated inside the app window; the frontend routes them here.
+#[tauri::command]
+fn open_external(url: String) -> Result<(), String> {
+    if !(url.starts_with("https://") || url.starts_with("http://")) || url.contains('\0') {
+        return Err("只允许打开 http(s) 链接".into());
+    }
+    // rundll32 url.dll,FileProtocolHandler hands the URL to the default
+    // browser without spawning a console window.
+    let _ = std::process::Command::new("rundll32.exe")
+        .args(["url.dll,FileProtocolHandler", &url])
+        .spawn()
+        .map_err(|e| format!("无法打开外部浏览器：{e}"))?;
+    Ok(())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -34,6 +50,7 @@ pub fn run() {
             commands::session::session_save,
             commands::session::session_load,
             exit_app,
+            open_external,
             #[cfg(windows)]
             commands::font::pick_system_font,
             #[cfg(windows)]

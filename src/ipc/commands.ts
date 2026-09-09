@@ -99,6 +99,11 @@ export function readImageBase64(path: string): Promise<string> {
   return invoke<string>("read_image_base64", { path });
 }
 
+/** Opens an http(s) URL in the OS default browser (never navigates the app). */
+export function openExternal(url: string): Promise<void> {
+  return invoke("open_external", { url });
+}
+
 export async function snapshotWrite(
   docKey: string,
   content: string,
