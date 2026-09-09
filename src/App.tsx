@@ -973,32 +973,63 @@ export default function App() {
       try {
         const bt = await benchTargets();
         if (bt && bt.files.length > 0) {
-          const rows: Array<{ count: number; openMs: number; memKb: number; chars: number }> = [];
+          const rows: Array<{
+            count: number;
+            openMs: number;
+            readMs: number;
+            langMs: number;
+            stateMs: number;
+            memKb: number;
+            chars: number;
+          }> = [];
           const startedAt = performance.now();
           for (let i = 0; i < bt.files.length; i++) {
             const p = bt.files[i];
             const t0 = performance.now();
             try {
+              // phase 1: read + decode over IPC
               const r = await readTextFile(p);
+              const readMs = performance.now() - t0;
+              // phase 2: language resolution
+              const tLang = performance.now();
               const langExt = await languageForFile(p);
-              setTabsState((prev) =>
-                store.openFile(prev, {
-                  path: p,
-                  diskContent: r.content,
-                  utf8Ok: r.utf8Ok,
-                  utf8Bom: r.utf8Bom,
-                  content: r.content,
-                  langExt,
-                  theme: themeExt,
-                  prefs,
-                }),
-              );
+              const langMs = performance.now() - tLang;
+              // phase 3: editor-state creation (CM doc build, synchronous)
+              const tState = performance.now();
+              const next = store.openFile(tabsRef.current, {
+                path: p,
+                diskContent: r.content,
+                utf8Ok: r.utf8Ok,
+                utf8Bom: r.utf8Bom,
+                content: r.content,
+                langExt,
+                theme: themeExt,
+                prefs,
+              });
+              setTabsState(next);
+              const stateMs = performance.now() - tState;
               // Give React + CodeMirror time to mount the new 100MB tab.
               await new Promise((res) => setTimeout(res, 400));
               const memKb = await processMemKb();
-              rows.push({ count: i + 1, openMs: Math.round(performance.now() - t0), memKb, chars: r.content.length });
+              rows.push({
+                count: i + 1,
+                openMs: Math.round(performance.now() - t0),
+                readMs: Math.round(readMs),
+                langMs: Math.round(langMs),
+                stateMs: Math.round(stateMs),
+                memKb,
+                chars: r.content.length,
+              });
             } catch (e) {
-              rows.push({ count: i + 1, openMs: Math.round(performance.now() - t0), memKb: 0, chars: 0 });
+              rows.push({
+                count: i + 1,
+                openMs: Math.round(performance.now() - t0),
+                readMs: 0,
+                langMs: 0,
+                stateMs: 0,
+                memKb: 0,
+                chars: 0,
+              });
             }
             try {
               await writeTextFile(bt.out, JSON.stringify({
