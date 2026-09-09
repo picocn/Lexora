@@ -52,6 +52,20 @@ describe("markdown 预览渲染", () => {
     expect(noToc).not.toContain("md-toc");
   });
 
+  it("supports GitLab-style {#id} custom anchors incl. wide chars", () => {
+    const html = renderMarkdown(
+      "## 安装指南 {#安装}\n\n重复说明\n\n## 安装指南 {#安装}\n\n## 常见问题 FAQ {#faq}",
+    );
+    // marker removed from visible text; custom ids win (wide chars OK)
+    expect(html).toContain('id="安装"');
+    expect(html).toContain(">安装指南</h2>");
+    // duplicate custom id gets -2
+    expect(html).toContain('id="安装-2"');
+    expect(html).toContain('id="faq"');
+    expect(html).toContain(">常见问题 FAQ</h2>");
+    expect(html).not.toContain("{#");
+  });
+
   it("highlights fenced code blocks with hljs classes", () => {
     const html = renderMarkdown("```ts\nconst x: number = 1;\n```");
     expect(html).toContain('class="hljs"');

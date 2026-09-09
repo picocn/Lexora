@@ -116,33 +116,65 @@ function headingText(state: { tokens: unknown[] }, openIdx: number): string {
   return out.trim();
 }
 
+md.core.ruler.before("inline", "header-custom-ids", (state) => {
+  const tokens = state.tokens as Array<{
+    type: string;
+    content: string;
+    attrSet?: (name: string, value: string) => void;
+  }>;
+  for (let i = 0; i < tokens.length; i++) {
+    const t = tokens[i];
+    if (t.type !== "heading_open") continue;
+    const inlineTok = tokens[i + 1];
+    if (!inlineTok || inlineTok.type !== "inline") continue;
+    // GitLab-style custom anchor: trailing "{#id}" on a heading line.
+    // The id may contain wide (CJK etc.) characters - anything but braces
+    // and whitespace. The marker is removed from the rendered heading text.
+    const m = /\{#([^{}\s]+?)\s*\}\s*$/.exec(inlineTok.content);
+    if (!m) continue;
+    const customId = m[1];
+    inlineTok.content =
+      inlineTok.content.slice(0, inlineTok.content.length - m[0].length).replace(/\s+$/, "");
+    t.attrSet?.("id", customId);
+    i += 2; // skip the inline + heading_close tokens we already visited
+  }
+  return true;
+});
+
 md.core.ruler.after("inline", "anchors-toc", (state) => {
   const tokens = state.tokens as Array<{
     type: string;
     tag?: string;
     content: string;
+    attrs?: Array<[string, string]> | null;
+    attrGet?: (name: string) => string | null;
     attrSet?: (name: string, value: string) => void;
     level?: number;
   }>;
   const used = new Set<string>();
   const headings: Array<{ level: number; text: string; id: string }> = [];
-  const headingOpen: Array<{ idx: number; level: number }> = [];
+
+  const getAttr = (tok: (typeof tokens)[number], name: string): string | null => {
+    if (typeof tok.attrGet === "function") return tok.attrGet(name);
+    return tok.attrs?.find((p) => p[0] === name)?.[1] ?? null;
+  };
 
   for (let i = 0; i < tokens.length; i++) {
     const t = tokens[i];
     if (t.type !== "heading_open" || !t.tag) continue;
     const level = Number(t.tag.slice(1)) || 1;
-    headingOpen.push({ idx: i, level });
     const text = headingText(state, i);
-    const base = slugify(text);
+    // Custom {#id} wins; otherwise fall back to the auto slug. Either way a
+    // duplicate gets a -2/-3... suffix so every anchor stays unique.
+    const custom = getAttr(t, "id");
+    const base = custom || slugify(text);
     let id = base;
     let n = 2;
     while (used.has(id)) id = `${base}-${n++}`;
     used.add(id);
     t.attrSet?.("id", id);
-    headings.push({ level, text, id });
+    headings.push({ level, text: text || base, id });
   }
-  void headingOpen;
 
   if (headings.length === 0) return true;
 
