@@ -4,7 +4,11 @@
 （0.1.9 → 0.2.0）。版本以 `src-tauri/tauri.conf.json` 为当前源，构建前用
 `node scripts/bump-version.mjs` 同步 package.json / Cargo.toml / 两个 lockfile。
 
-## 0.2.8（本轮）
+## 0.2.9（本轮）
+- 锚点跳转加固：除精确 id 匹配外，增加“去标点/空格/大小写”的宽松归一化回退，
+  兼容手写 slug 与自动生成 id 在符号差异（如 `安装-配置` ↔ `安装配置`）时的跳转。
+
+## 0.2.8（锚点与目录）
 - Markdown 预览支持 GitHub 风格锚点与目录：标题自动生成 id（中文保留、重复 -2/-3）；
   `[跳转](#标题slug)` 与文首 `[TOC]` 目录可用，锚点点击平滑滚动。
 

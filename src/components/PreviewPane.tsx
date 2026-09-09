@@ -35,6 +35,15 @@ function cachedImageDataUrl(path: string, mime: string): Promise<string> {
     });
 }
 
+/** Case/punctuation-insensitive anchor id comparison. */
+function normalizeAnchor(s: string): string {
+  try {
+    return s.normalize("NFKC").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
+  } catch {
+    return s.toLowerCase().replace(/[^a-z0-9\u4e00-\u9fff]+/gi, "");
+  }
+}
+
 export interface PreviewPaneHandle {
   /** Scroll the preview so the markdown source line appears near the top. */
   scrollToSourceLine(line: number): void;
@@ -201,7 +210,14 @@ export const PreviewPane = forwardRef<PreviewPaneHandle, PreviewPaneProps>(
           const found =
             host?.getElementById(id) ??
             host?.querySelector(`[id="${CSS.escape(id)}"]`) ??
-            document.getElementById(id);
+            document.getElementById(id) ??
+            // Loose fallback: compare the fragment against every element id
+            // after stripping punctuation/spaces/case - covers slug variants
+            // (e.g. generated "安装配置" vs hand-written "#安装-配置").
+            Array.from(
+              host?.querySelectorAll<HTMLElement>("[id]") ?? document.querySelectorAll<HTMLElement>("[id]"),
+            ).find((el) => normalizeAnchor(el.getAttribute("id") ?? "") === normalizeAnchor(id)) ??
+            undefined;
           found?.scrollIntoView({ behavior: "smooth", block: "start" });
         }
       };
