@@ -430,11 +430,35 @@ export default function App() {
   /** Opens an already-read file into a tab. `focus=false` opens in the
    * background (L2: keep the current tab on screen for big files). */
   const openLoaded = useCallback(
-    async (path: string, r: FileReadResult, focus: boolean) => {
+    async (
+      path: string,
+      r: FileReadResult,
+      focus: boolean,
+      opts?: { recent?: boolean },
+    ) => {
       const langExt = await languageForFile(path);
       const veryLarge = r.content.length >= UNLOAD_BIG_CHARS;
-      setTabsState((prev) =>
-        store.openFile(prev, {
+      setTabsState((prev) => {
+        let n = prev;
+        // L3 pre-unload: before a very large tab becomes resident, free the
+        // oldest resident very-large clean tabs so the resident count never
+        // exceeds KEEP_LOADED_BIG even at the peak of this open.
+        if (veryLarge) {
+          const loaded = prev.tabs.filter(
+            (t) =>
+              isEditor(t) &&
+              !t.unloaded &&
+              !tabDirty(t) &&
+              t.model.path != null &&
+              t.model.id !== prev.activeId &&
+              t.cmState.doc.length >= UNLOAD_BIG_CHARS,
+          );
+          const excess = loaded.length - Math.max(0, KEEP_LOADED_BIG - 1);
+          for (let i = 0; i < excess; i++) {
+            n = store.unloadBigTab(n, loaded[i].model.id, { theme: themeExt, prefs });
+          }
+        }
+        return store.openFile(n, {
           path,
           diskContent: r.content,
           utf8Ok: r.utf8Ok,
@@ -445,9 +469,9 @@ export default function App() {
           prefs,
           focus,
           noHistory: veryLarge,
-        }),
-      );
-      pushRecent(path);
+        });
+      });
+      if (opts?.recent !== false) pushRecent(path);
     },
     [prefs, themeExt, pushRecent],
   );
@@ -1082,8 +1106,6 @@ export default function App() {
             count: number;
             openMs: number;
             readMs: number;
-            langMs: number;
-            stateMs: number;
             memKb: number;
             chars: number;
           }> = [];
@@ -1095,34 +1117,15 @@ export default function App() {
               // phase 1: read + decode over IPC
               const r = await readTextFile(p);
               const readMs = performance.now() - t0;
-              // phase 2: language resolution
-              const tLang = performance.now();
-              const langExt = await languageForFile(p);
-              const langMs = performance.now() - tLang;
-              // phase 3: editor-state creation (CM doc build, synchronous)
-              const tState = performance.now();
-              const next = store.openFile(tabsRef.current, {
-                path: p,
-                diskContent: r.content,
-                utf8Ok: r.utf8Ok,
-                utf8Bom: r.utf8Bom,
-                content: r.content,
-                langExt,
-                theme: themeExt,
-                prefs,
-                noHistory: r.content.length >= UNLOAD_BIG_CHARS,
-              });
-              setTabsState(next);
-              const stateMs = performance.now() - tState;
-              // Give React + CodeMirror time to mount the new 100MB tab.
+              // phase 2+3: real product open path (lang + state + L3 pre-unload)
+              await openLoaded(p, r, true, { recent: false });
+              // Give React + CodeMirror time to mount the new tab.
               await new Promise((res) => setTimeout(res, 400));
               const memKb = await processMemKb();
               rows.push({
                 count: i + 1,
                 openMs: Math.round(performance.now() - t0),
                 readMs: Math.round(readMs),
-                langMs: Math.round(langMs),
-                stateMs: Math.round(stateMs),
                 memKb,
                 chars: r.content.length,
               });
@@ -1131,8 +1134,6 @@ export default function App() {
                 count: i + 1,
                 openMs: Math.round(performance.now() - t0),
                 readMs: 0,
-                langMs: 0,
-                stateMs: 0,
                 memKb: 0,
                 chars: 0,
               });
