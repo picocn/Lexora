@@ -1,6 +1,6 @@
 [package]
 name = "lexora"
-version = "0.3.5"
+version = "0.3.6"
 description = "Lexora - lightweight multi-tab markdown editor"
 edition = "2024"
 
