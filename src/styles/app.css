@@ -194,7 +194,8 @@ body {
   align-items: stretch;
   background: var(--tab-bg);
   border-bottom: 1px solid var(--border-soft);
-  height: 40px;
+  /* Same height as the custom title bar above (36px). */
+  height: 36px;
   flex: 0 0 auto;
   user-select: none;
 }
@@ -218,15 +219,16 @@ body {
 .tab {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 0 8px 0 14px;
-  height: 32px;
-  margin: 4px 2px 0 0;
-  border-radius: 8px 8px 0 0;
+  gap: 5px;
+  padding: 0 6px 0 10px;
+  height: 26px;
+  margin: 5px 2px 0 0;
+  border-radius: 7px 7px 0 0;
   cursor: pointer;
   color: var(--fg);
   opacity: 0.85;
-  max-width: 220px;
+  max-width: 200px;
+  font-size: 12px; /* slightly smaller to avoid crowding */
   flex: 0 0 auto;
 }
 
@@ -244,11 +246,12 @@ body {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  line-height: 1.2;
 }
 
 .dirty-dot {
-  width: 8px;
-  height: 8px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
   background: var(--accent);
   display: inline-block;
@@ -259,9 +262,9 @@ body {
   border: none;
   background: transparent;
   color: inherit;
-  font-size: 14px;
+  font-size: 12px;
   line-height: 1;
-  padding: 2px 4px;
+  padding: 2px 3px;
   border-radius: 4px;
   cursor: pointer;
   opacity: 0.6;

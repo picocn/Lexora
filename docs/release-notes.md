@@ -4,7 +4,11 @@
 （0.1.9 → 0.2.0）。版本以 `src-tauri/tauri.conf.json` 为当前源，构建前用
 `node scripts/bump-version.mjs` 同步 package.json / Cargo.toml / 两个 lockfile。
 
-## 0.2.5（本轮）
+## 0.2.6（本轮）
+- 标签栏与顶栏同高（36px）；标签字体缩小至 12px、内边距/最大宽度收紧，长标题省略号，
+  多标签不纵向溢出。
+
+## 0.2.5（标题栏按钮）
 - 标题栏窗口按钮按 Edge 风格调整：46px 宽、整行高、矢量图标（12px）替换文本符号；
   最大化/还原图标随窗口状态切换（含 Aero-snap）；悬停底色、关闭红 #c42b1c。
 
