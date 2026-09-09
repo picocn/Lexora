@@ -124,12 +124,18 @@ export function EditorHost({
     }
 
     const prevId = activeIdRef.current;
-    const swapped = prevId !== tab.model.id || view.state !== tab.cmState;
+    // Only treat the state as needing a swap when the DOCUMENT differs.
+    // Selection-only moves (caret/arrows/mouse) leave the store one state
+    // behind on purpose (docChanged-only sync); comparing full state objects
+    // here would re-apply that stale state on unrelated re-renders and snap
+    // the caret back to its previous position.
+    const contentChanged = view.state.doc !== tab.cmState.doc;
+    const swapped = prevId !== tab.model.id || contentChanged;
     if (prevId && prevId !== tab.model.id) {
       scrollMap.set(prevId, view.scrollDOM.scrollTop);
     }
     if (swapped) {
-      if (view.state !== tab.cmState) {
+      if (contentChanged) {
         view.setState(tab.cmState);
         // view.setState replaces the whole state without an update event, so no
         // cursor report is emitted by the per-tab listener: publish the new
