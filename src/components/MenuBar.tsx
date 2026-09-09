@@ -208,7 +208,10 @@ function MenuRow({
           onMouseEnter={openNow}
           onMouseLeave={scheduleClose}
         >
-          {item.children?.(close)}
+          {item.children?.(() => {
+            close();
+            onItemAction?.(); // also hide the outer (brand) menu
+          })}
         </div>
       )}
     </div>
