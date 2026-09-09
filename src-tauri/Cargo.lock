@@ -1683,7 +1683,7 @@ dependencies = [
 
 [[package]]
 name = "lexora"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "serde",
  "serde_json",
