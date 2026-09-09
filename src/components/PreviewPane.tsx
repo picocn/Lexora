@@ -180,15 +180,16 @@ export const PreviewPane = forwardRef<PreviewPaneHandle, PreviewPaneProps>(
       };
     }, [html, basePath]);
 
-    // Click interception: external http(s) links must never navigate the app
-    // webview (window hijack / session loss) - route them to the OS browser.
+    // Click interception (document-level capture so it works regardless of
+    // which render branch was mounted first): external http(s) links open in
+    // the OS browser, #fragments smooth-scroll within the markdown preview.
     useEffect(() => {
-      const el = scrollRef.current;
-      if (!el) return;
-      const onPreviewClick = (e: MouseEvent) => {
+      const onDocClick = (e: MouseEvent) => {
         const target = e.target as HTMLElement | null;
         const anchor = target?.closest<HTMLAnchorElement>("a[href]");
         if (!anchor) return;
+        // Only handle anchors rendered inside the markdown preview content.
+        if (!anchor.closest(".preview-scroll")) return;
         const href = anchor.getAttribute("href") ?? "";
         if (/^https?:\/\//i.test(href)) {
           e.preventDefault();
@@ -197,7 +198,7 @@ export const PreviewPane = forwardRef<PreviewPaneHandle, PreviewPaneProps>(
           return;
         }
         if (href.startsWith("#") && href.length > 1) {
-          // In-document anchor: smooth-scroll to the heading (no navigation).
+          // In-document anchor: deterministic scroll to the heading.
           e.preventDefault();
           e.stopPropagation();
           let id: string;
@@ -218,20 +219,20 @@ export const PreviewPane = forwardRef<PreviewPaneHandle, PreviewPaneProps>(
               host?.querySelectorAll<HTMLElement>("[id]") ?? document.querySelectorAll<HTMLElement>("[id]"),
             ).find((el) => normalizeAnchor(el.getAttribute("id") ?? "") === normalizeAnchor(id)) ??
             undefined;
-          // Deterministic jump: scroll the preview's own scroll container to
-          // the heading's offset. scrollIntoView can wander because several
-          // nested scroll containers compete for the scroll.
-          const container = el as HTMLElement | null;
-          if (found && container) {
-            const cRect = container.getBoundingClientRect();
+          // Deterministic jump on the preview's own scroll container (instant,
+          // no smooth animation that later events could interrupt). Guarded so
+          // a non-scrollable container never "scrolls" anywhere.
+          const scroller = anchor.closest<HTMLElement>(".preview-scroll") as HTMLElement | null;
+          if (found && scroller && scroller.scrollHeight > scroller.clientHeight + 1) {
+            const cRect = scroller.getBoundingClientRect();
             const fRect = found.getBoundingClientRect();
-            const top = container.scrollTop + (fRect.top - cRect.top) - 8;
-            container.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
+            const target = Math.max(0, scroller.scrollTop + (fRect.top - cRect.top) - 8);
+            scroller.scrollTop = target;
           }
         }
       };
-      el.addEventListener("click", onPreviewClick, true);
-      return () => el.removeEventListener("click", onPreviewClick, true);
+      document.addEventListener("click", onDocClick, true);
+      return () => document.removeEventListener("click", onDocClick, true);
     }, []);
 
     // Report the source line near the top of the preview viewport while
