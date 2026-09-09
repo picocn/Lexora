@@ -53,7 +53,6 @@ import {
   languageForFile,
   languageForOverride,
   labelOfOverride,
-  isMarkdownFileName,
 } from "./editor/languages";
 import { builtinTheme, themeFromVscode, type ResolvedTheme } from "./editor/themes";
 import { parseVscodeTheme } from "./editor/vscodeTheme";
@@ -126,6 +125,21 @@ function labelForName(name: string): string {
   if (/\.php$/.test(base)) return "PHP";
   if (/\.rb$/.test(base)) return "Ruby";
   return "纯文本";
+}
+
+/** Document kinds that support preview. */
+type PreviewKind = "markdown" | "html";
+
+/** Whether a doc (by filename and/or language override) supports preview, and
+ * with which renderer. */
+function previewKindOf(title: string, override: string | null): PreviewKind | null {
+  const over = (override ?? "").toLowerCase();
+  if (over === "markdown") return "markdown";
+  if (over === "html" || over === "htm") return "html";
+  const t = title.toLowerCase();
+  if (/\.(md|markdown|mdown)$/.test(t)) return "markdown";
+  if (/\.html?$/.test(t)) return "html";
+  return null;
 }
 
 /** Escapes a string for literal use inside a RegExp. */
@@ -621,20 +635,21 @@ export default function App() {
   }, [activeEditorId, saveTabById]);
 
   // ---- preview ---------------------------------------------------------------
-  /** True when the active tab is an editor editing markdown. */
-  const activeIsMarkdown = useMemo(() => {
-    if (!activeTab || !isEditor(activeTab)) return false;
-    return (
-      isMarkdownFileName(activeTab.model.title) || activeTab.model.languageOverride === "markdown"
-    );
-  }, [activeTab]);
+  /** 'markdown' | 'html' | null for the active editor tab (preview gating). */
+  const activePreviewKind = useMemo(
+    () =>
+      activeTab && isEditor(activeTab)
+        ? previewKindOf(activeTab.model.title, activeTab.model.languageOverride)
+        : null,
+    [activeTab],
+  );
 
   const onPreview = useCallback(() => {
-    if (!activeIsMarkdown || !activeTab) return;
+    if (!activePreviewKind || !activeTab) return;
     setTabsState((prev) =>
       store.openPreview(prev, { sourceTabId: activeTab.model.id, theme: themeExt, prefs }),
     );
-  }, [activeIsMarkdown, activeTab, prefs, themeExt]);
+  }, [activePreviewKind, activeTab, prefs, themeExt]);
 
   // ---- closing -------------------------------------------------------------
   const requestCloseTab = useCallback(
@@ -884,7 +899,7 @@ export default function App() {
         setShowSettings(true);
       } else if (mod && k === "p") {
         e.preventDefault();
-        if (activeIsMarkdown) onPreview();
+        if (activePreviewKind) onPreview();
       } else if (mod && k === "f") {
         // Ctrl+F: open the search panel. Inside the editor (or its panel) the
         // CodeMirror keymap already handles it - only route when focus is
@@ -913,7 +928,7 @@ export default function App() {
     onSaveAs,
     requestCloseTab,
     cycleLayout,
-    activeIsMarkdown,
+    activePreviewKind,
     onPreview,
     onFind,
     showSettings,
@@ -1252,9 +1267,9 @@ export default function App() {
           { type: "sep" },
           {
             type: "item",
-            label: "预览 Markdown",
+            label: activePreviewKind === "html" ? "预览 HTML" : "预览 Markdown",
             shortcut: "Ctrl+P",
-            disabled: !activeIsMarkdown,
+            disabled: !activePreviewKind,
             onAction: onPreview,
           },
           { type: "sep" },
@@ -1298,8 +1313,7 @@ export default function App() {
     ];
   }, [
     activeEditorId,
-    activeIsMarkdown,
-    hasMountedEditor,
+    activePreviewKind,    hasMountedEditor,
     onNew,
     onOpen,
     onSave,
@@ -1343,9 +1357,11 @@ export default function App() {
         : undefined
       : activeTab;
     if (!source || !isEditor(source)) return null;
+    const kind = previewKindOf(source.model.title, source.model.languageOverride);
+    if (!kind) return null;
     const len = source.cmState.doc.length;
-    if (len > PREVIEW_MAX_CHARS) return { text: "", overLimitChars: len };
-    return { text: tabText(source), overLimitChars: 0 };
+    if (len > PREVIEW_MAX_CHARS) return { text: "", overLimitChars: len, kind };
+    return { text: tabText(source), overLimitChars: 0, kind };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [previewVisible, activeTab, tabsState]);
 
@@ -1364,7 +1380,14 @@ export default function App() {
 
   const activeLanguage = activeTab
     ? isPreview(activeTab)
-      ? "Markdown 预览"
+      ? previewKindOf(activeTab.model.title, null) === "html" ||
+        (activeTab.model.sourceTabId &&
+          previewKindOf(
+            store.getTab(tabsState, activeTab.model.sourceTabId)?.model.title ?? "",
+            store.getTab(tabsState, activeTab.model.sourceTabId)?.model.languageOverride ?? null,
+          ) === "html")
+        ? "HTML 预览"
+        : "Markdown 预览"
       : activeTab.model.languageOverride
         ? labelOfOverride(activeTab.model.languageOverride)
         : labelForName(activeTab.model.title)
@@ -1387,6 +1410,7 @@ export default function App() {
         <PreviewPane
           text={previewPayload?.text ?? ""}
           overLimitChars={previewPayload?.overLimitChars}
+          kind={previewPayload?.kind ?? "markdown"}
           basePath={previewBasePath}
           fontFamily={previewFontFamily}
           fontSize={previewFontSize}
@@ -1401,6 +1425,7 @@ export default function App() {
         <PreviewPane
           text={previewPayload?.text ?? ""}
           overLimitChars={previewPayload?.overLimitChars}
+          kind={previewPayload?.kind ?? "markdown"}
           basePath={previewBasePath}
           fontFamily={previewFontFamily}
           fontSize={previewFontSize}
@@ -1425,6 +1450,7 @@ export default function App() {
             ref={previewHandleRef}
             text={previewPayload?.text ?? ""}
           overLimitChars={previewPayload?.overLimitChars}
+          kind={previewPayload?.kind ?? "markdown"}
             basePath={previewBasePath}
             fontFamily={previewFontFamily}
             fontSize={previewFontSize}
@@ -1485,7 +1511,7 @@ export default function App() {
           t.model.languageOverride ? labelOfOverride(t.model.languageOverride) : labelForName(t.model.title),
         )}
         activeId={tabsState.activeId}
-        canPreview={activeIsMarkdown}
+        canPreview={activePreviewKind != null}
         onActivate={onActivate}
         onClose={requestCloseTab}
         onPreview={onPreview}

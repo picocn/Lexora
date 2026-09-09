@@ -81,10 +81,14 @@ autosave{enabled,intervalSec}、editor{fontFamily,fontSize,lineHeight,tabSize,wo
 - onActivate：目标 tab `unloaded` → 读盘 + 原地 reloadBigTab（保留 id/顺序、恢复 languageOverride）+ “正在加载大文件…”；失败则保持原活动并提示
 - 细节与实测见 `large-file-strategy.zh.md`
 
-### 5.4 预览（防 OOM）
-- PreviewPane：text>800 万字符 → 跳过渲染，显示“预览已禁用”说明（三种入口一致）
-- 正常路径：debounce 300ms → render.ts（markdown-it html:false + texmath/KaTeX + mermaid 块 + data-line）→ mermaid lazy render + 图片 fixup（decodeURIComponent→resolveLocalImageSrc→read_image_base64→data URL）
-- 分屏滚动同步：块级 data-line ↔ 编辑器视口行
+### 5.4 预览（防 OOM + HTML 沙箱）
+- PreviewPane 按 `kind` 分流：`markdown` → 现有管线；`html` → `buildHtmlPreview`
+  （DOMParser 静态化：本地相对图片内联 data URL + 注入文档级 CSP）+ `<iframe sandbox="">`
+  （无 allow-scripts/same-origin/forms/top-navigation）→ 脚本/表单/对象/顶层导航全禁。
+- text>800 万字符 → 跳过渲染显示“预览已禁用”（三种入口一致，HTML 同）。
+- Markdown 路径：debounce 300ms → render.ts（html:false + texmath/KaTeX + mermaid 块 + data-line）
+  → mermaid lazy render + 图片 fixup（decode→resolve→read_image_base64→data URL，模块级缓存）。
+- 分屏滚动同步（仅 Markdown）：块级 data-line ↔ 编辑器视口行。
 
 ### 5.5 主题
 - 内置 light/dark 静态 HighlightStyle + palette；VS Code 导入 JSON 解析（含 tokenColors 前缀→Tag、颜色保留；状态栏 statusBg 取 statusBar.background，缺省中性色）存储于 localStorage（lexora.vscodeThemes.v1），可在设置删除；删除在用主题回退内置浅色

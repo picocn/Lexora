@@ -42,6 +42,8 @@ export interface PreviewPaneHandle {
 
 export interface PreviewPaneProps {
   text: string;
+  /** Kind of rendering: markdown pipeline or static sandboxed HTML. */
+  kind?: "markdown" | "html";
   /** When the doc exceeds the preview limit the caller passes "" as text and
    * reports the real character count here; we show the disabled notice. */
   overLimitChars?: number;
@@ -56,16 +58,58 @@ export interface PreviewPaneProps {
   onPreviewScroll?: (line: number) => void;
 }
 
-/** Renders the edited markdown (html:false enforced by render.ts).
- * Block-level elements carry data-line anchors from the renderer, used by
- * split-view scroll sync. */
+/** Builds a static, script-free snapshot of an HTML file for the sandboxed
+ * preview: relative local images are inlined as data: URLs (Chromium blocks
+ * file: sub-resources from a sandboxed srcdoc), everything else stays as
+ * authored. Parsing via DOMParser never executes scripts or loads anything. */
+async function buildHtmlPreview(text: string, basePath: string | null): Promise<string> {
+  let doc: Document;
+  try {
+    doc = new DOMParser().parseFromString(text, "text/html");
+  } catch {
+    return text;
+  }
+  const baseDir = basePath ? dirnameOf(basePath) : null;
+  const imgs = Array.from(doc.querySelectorAll<HTMLImageElement>("img[src]"));
+  for (const img of imgs) {
+    const src = img.getAttribute("src");
+    if (!src) continue;
+    const local = resolveLocalImageSrc(src, baseDir);
+    if (!local) continue;
+    try {
+      img.setAttribute("src", await cachedImageDataUrl(local, mimeOfPath(local)));
+    } catch {
+      /* leave the original src */
+    }
+  }
+  // Hard restrictions inside the sandboxed document (defense in depth beyond
+  // the sandbox attribute): no scripts/frames/objects/forms/connect, only
+  // inline+https styles and data:/https images.
+  let head = doc.querySelector("head");
+  if (!head) {
+    head = doc.createElement("head");
+    doc.documentElement.insertBefore(head, doc.documentElement.firstChild);
+  }
+  const meta = doc.createElement("meta");
+  meta.setAttribute("http-equiv", "Content-Security-Policy");
+  meta.setAttribute(
+    "content",
+    "default-src 'none'; style-src 'unsafe-inline' https:; img-src data: https:; script-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; connect-src 'none'",
+  );
+  head.prepend(meta);
+  return "<!DOCTYPE html>\n" + doc.documentElement.outerHTML;
+}
+
+/** Renders the edited document: markdown (html:false enforced by render.ts)
+ * or static sandboxed HTML. Block-level elements carry data-line anchors for
+ * markdown, used by split-view scroll sync. */
 export const PreviewPane = forwardRef<PreviewPaneHandle, PreviewPaneProps>(
   function PreviewPane(
-    { text, overLimitChars, fontFamily, fontSize, vars, debounceMs = 300, basePath, onPreviewScroll },
+    { text, kind = "markdown", overLimitChars, fontFamily, fontSize, vars, debounceMs = 300, basePath, onPreviewScroll },
     ref,
   ) {
-    // Whole-document markdown rendering of extremely large docs OOMs the
-    // webview; above the limit we show a notice instead of rendering.
+    // Whole-document rendering of extremely large docs OOMs the webview;
+    // above the limit we show a notice instead of rendering.
     const limitChars =
       overLimitChars && overLimitChars > 0
         ? overLimitChars
@@ -73,10 +117,12 @@ export const PreviewPane = forwardRef<PreviewPaneHandle, PreviewPaneProps>(
           ? text.length
           : 0;
     const overLimit = limitChars > 0;
+    const isHtml = kind === "html";
     const [html, setHtml] = useState(() =>
-      overLimit ? "" : renderMarkdown(text),
+      overLimit ? "" : isHtml ? "" : renderMarkdown(text),
     );
     const timer = useRef<number | null>(null);
+    const seqRef = useRef(0);
     const scrollRef = useRef<HTMLDivElement | null>(null);
     const onPreviewScrollRef = useRef(onPreviewScroll);
     onPreviewScrollRef.current = onPreviewScroll;
@@ -90,13 +136,22 @@ export const PreviewPane = forwardRef<PreviewPaneHandle, PreviewPaneProps>(
         return;
       }
       if (timer.current) window.clearTimeout(timer.current);
+      const seq = ++seqRef.current;
       timer.current = window.setTimeout(() => {
-        setHtml(renderMarkdown(text));
+        if (isHtml) {
+          // Static HTML snapshot is built async (local images -> data URLs);
+          // a stale result must never overwrite a newer one.
+          void buildHtmlPreview(text, basePath ?? null).then((h) => {
+            if (seqRef.current === seq) setHtml(h);
+          });
+        } else {
+          setHtml(renderMarkdown(text));
+        }
       }, debounceMs);
       return () => {
         if (timer.current) window.clearTimeout(timer.current);
       };
-    }, [text, debounceMs, limitChars]);
+    }, [text, debounceMs, limitChars, isHtml, basePath]);
 
     // After every HTML refresh: render mermaid diagrams and fix up local image
     // srcs (relative paths resolve against the document's folder; absolute
@@ -197,6 +252,26 @@ export const PreviewPane = forwardRef<PreviewPaneHandle, PreviewPaneProps>(
               <p>请在编辑区查看与编辑内容；如需预览，请将文档拆分为更小的文件。</p>
             </div>
           </div>
+        </div>
+      );
+    }
+
+    if (isHtml) {
+      // Sandboxed static HTML preview: no allow-scripts/same-origin/forms/
+      // top-navigation/popups. Inner document enforces its own CSP (see
+      // buildHtmlPreview), so HTML from disk can never script or restyle the
+      // app or navigate away.
+      return (
+        <div
+          className="preview-html-wrap"
+          style={{ ...vars, fontFamily, fontSize: `${fontSize}px` }}
+        >
+          <iframe
+            className="html-frame"
+            title="HTML 静态预览（脚本已禁用）"
+            sandbox=""
+            srcDoc={html}
+          />
         </div>
       );
     }

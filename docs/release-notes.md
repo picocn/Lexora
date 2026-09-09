@@ -4,7 +4,12 @@
 （0.1.9 → 0.2.0）。版本以 `src-tauri/tauri.conf.json` 为当前源，构建前用
 `node scripts/bump-version.mjs` 同步 package.json / Cargo.toml / 两个 lockfile。
 
-## 0.2.3（本轮：专项审查修订）
+## 0.2.4（本轮）
+- 新能力：HTML(.html/.htm) 支持预览——与 Markdown 同一“▶ 预览”入口；采用
+  iframe `sandbox` 沙箱静态渲染（禁脚本/表单/对象/顶层导航，文档内注入 CSP），
+  本地相对图片内联 data URL，外链交系统浏览器；超 800 万字符同样禁用防 OOM。
+
+## 0.2.3（审查修订）
 - 审查：安全 / 性能 / 死代码 三路审计并修订。
 - 安全：预览 http(s) 链接改由系统浏览器打开（不再整窗导航）；生产 CSP 收紧
   （去掉 http 图片与多余 connect-src，补 object-src/base-uri/form-action）；
