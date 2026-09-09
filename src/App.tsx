@@ -1554,7 +1554,7 @@ export default function App() {
           </button>
           {brandMenuOpen && (
             <div className="brand-pop">
-              <MenuBar groups={menuGroups} onItemAction={closeBrandMenu} />
+              <MenuBar groups={menuGroups} onItemAction={closeBrandMenu} vertical />
             </div>
           )}
         </div>

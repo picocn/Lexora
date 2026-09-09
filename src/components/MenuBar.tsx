@@ -20,16 +20,19 @@ export interface MenuGroupDef {
   items: MenuItemDef[];
 }
 
-/** Simple menu groups (文件 / 编辑 / 帮助 …) usable both as a top bar or
- * inside the brand dropdown. Menus open on click; with one open, hovering
- * another group switches to it; an item click runs its action and closes. */
+/** Menu groups (文件 / 编辑 / 帮助 …). Horizontal top-bar usage or, with
+ * `vertical`, a column whose items open their command lists to the right
+ * (used by the logo dropdown). An item click runs its action and closes. */
 export function MenuBar({
   groups,
   onItemAction,
+  vertical = false,
 }: {
   groups: MenuGroupDef[];
   /** Called after any menu item action runs (lets an outer popover close). */
   onItemAction?: () => void;
+  /** Render the group labels vertically with right-side submenus. */
+  vertical?: boolean;
 }) {
   const [openKey, setOpenKey] = useState<string | null>(null);
   const barRef = useRef<HTMLDivElement | null>(null);
@@ -53,25 +56,34 @@ export function MenuBar({
   const close = () => setOpenKey(null);
 
   return (
-    <div className="menubar" ref={barRef}>
+    <div
+      className={`menubar ${vertical ? "menubar-v" : ""}`}
+      ref={barRef}
+      onMouseLeave={vertical ? () => setOpenKey(null) : undefined}
+    >
       {groups.map((g) => (
         <div className="menu" key={g.key}>
           <button
-            className={`menu-trigger ${openKey === g.key ? "open" : ""}`}
+            className={`menu-trigger ${vertical ? "menu-trigger-v" : ""} ${openKey === g.key ? "open" : ""}`}
             onClick={(e) => {
               e.stopPropagation();
               setOpenKey(openKey === g.key ? null : g.key);
             }}
             onMouseEnter={() => {
-              // Once a menu is open, hovering another group switches to it
-              // (classic desktop/VSCode behavior).
-              if (openKey && openKey !== g.key) setOpenKey(g.key);
+              // Hovering a first-level item opens its submenu to the right
+              // and switches when another item is open.
+              setOpenKey(g.key);
             }}
           >
-            {g.label}
+            <span className="menu-trigger-label">{g.label}</span>
+            {vertical && (
+              <span className="menu-v-caret" aria-hidden="true">
+                ›
+              </span>
+            )}
           </button>
           {openKey === g.key && (
-            <div className="menu-panel" role="menu">
+            <div className={`menu-panel ${vertical ? "menu-panel-right" : ""}`} role="menu">
               {g.items.map((item, i) => (
                 <MenuRow key={i} item={item} close={close} onItemAction={onItemAction} />
               ))}

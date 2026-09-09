@@ -1296,3 +1296,30 @@ button.title-brand {
 .title-actions-preview:hover {
   background: color-mix(in srgb, var(--fg, #333) 10%, transparent);
 }
+
+/* ---------- vertical first-level menu (logo dropdown) ---------- */
+.menubar-v {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0;
+  width: 170px;
+}
+.menubar-v .menu-trigger-v {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 10px;
+  text-align: left;
+  font-size: 13px;
+  border-radius: 6px;
+}
+.menubar-v .menu-v-caret {
+  opacity: 0.6;
+  font-size: 12px;
+}
+.menu-panel-right {
+  left: calc(100% + 2px);
+  top: 0;
+}
