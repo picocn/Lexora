@@ -36,6 +36,33 @@ export function MenuBar({
 }) {
   const [openKey, setOpenKey] = useState<string | null>(null);
   const barRef = useRef<HTMLDivElement | null>(null);
+  const closeTimer = useRef<number | null>(null);
+
+  const cancelCloseGroups = () => {
+    if (closeTimer.current != null) {
+      window.clearTimeout(closeTimer.current);
+      closeTimer.current = null;
+    }
+  };
+
+  const scheduleCloseGroups = () => {
+    cancelCloseGroups();
+    closeTimer.current = window.setTimeout(() => {
+      closeTimer.current = null;
+      setOpenKey(null);
+    }, 180); // grace for moving the pointer across the gap into a submenu
+  };
+
+  const openGroup = (key: string) => {
+    cancelCloseGroups();
+    setOpenKey(key);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (closeTimer.current != null) window.clearTimeout(closeTimer.current);
+    };
+  }, []);
 
   useEffect(() => {
     if (!openKey) return;
@@ -59,7 +86,7 @@ export function MenuBar({
     <div
       className={`menubar ${vertical ? "menubar-v" : ""}`}
       ref={barRef}
-      onMouseLeave={vertical ? () => setOpenKey(null) : undefined}
+      onMouseLeave={vertical ? scheduleCloseGroups : undefined}
     >
       {groups.map((g) => (
         <div className="menu" key={g.key}>
@@ -67,12 +94,13 @@ export function MenuBar({
             className={`menu-trigger ${vertical ? "menu-trigger-v" : ""} ${openKey === g.key ? "open" : ""}`}
             onClick={(e) => {
               e.stopPropagation();
-              setOpenKey(openKey === g.key ? null : g.key);
+              if (openKey === g.key) close();
+              else openGroup(g.key);
             }}
             onMouseEnter={() => {
               // Hovering a first-level item opens its submenu to the right
               // and switches when another item is open.
-              setOpenKey(g.key);
+              openGroup(g.key);
             }}
           >
             <span className="menu-trigger-label">{g.label}</span>
@@ -83,7 +111,11 @@ export function MenuBar({
             )}
           </button>
           {openKey === g.key && (
-            <div className={`menu-panel ${vertical ? "menu-panel-right" : ""}`} role="menu">
+            <div
+              className={`menu-panel ${vertical ? "menu-panel-right" : ""}`}
+              role="menu"
+              onMouseEnter={vertical ? cancelCloseGroups : undefined}
+            >
               {g.items.map((item, i) => (
                 <MenuRow key={i} item={item} close={close} onItemAction={onItemAction} />
               ))}

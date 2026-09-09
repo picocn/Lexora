@@ -67,7 +67,7 @@ body {
   top: calc(100% + 2px);
   left: 0;
   min-width: 190px;
-  background: var(--panel-bg);
+  background: var(--bg);
   color: var(--fg);
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -82,7 +82,7 @@ body {
 .menu-panel.submenu {
   left: calc(100% - 6px);
   top: -4px;
-  background: var(--panel-bg);
+  background: var(--bg);
   color: var(--fg);
 }
 
@@ -941,7 +941,8 @@ body {
   align-items: stretch;
   flex: 0 0 auto;
   height: 36px;
-  background: var(--panel-bg);
+  background: var(--bg); /* match the selected theme's editor background */
+  color: var(--fg);
   border-bottom: 1px solid var(--border-soft);
   user-select: none;
 }
@@ -1254,7 +1255,7 @@ body {
   top: calc(100% + 1px);
   left: 0;
   min-width: 200px;
-  background: var(--panel-bg);
+  background: var(--bg); /* follow the theme */
   color: var(--fg);
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -1269,9 +1270,8 @@ body {
   padding: 0;
   flex-wrap: wrap;
 }
-.brand-pop .menu-panel {
-  top: 100%;
-}
+/* NOTE: do not force panels below their row here - the vertical layout's
+   right-side panels (and nested submenus) align side-by-side instead. */
 
 /* brand as a real button */
 button.title-brand {
@@ -1321,5 +1321,5 @@ button.title-brand {
 }
 .menu-panel-right {
   left: calc(100% + 2px);
-  top: 0;
+  top: 0; /* align with the first-level item instead of dropping a row */
 }
