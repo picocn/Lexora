@@ -66,6 +66,8 @@ pub fn run() {
             commands::print_doc::take_print_doc,
             commands::print_doc::open_print_window,
             commands::print_doc::close_print_window,
+            commands::print_doc::print_window_show_dialog,
+            commands::print_doc::print_in_browser,
             commands::snapshots::snapshot_write,
             commands::snapshots::snapshot_list,
             commands::snapshots::snapshot_remove,

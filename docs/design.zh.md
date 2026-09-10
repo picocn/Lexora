@@ -160,7 +160,10 @@ autosave{enabled,intervalSec}、editor{fontFamily,fontSize,lineHeight,tabSize,wo
 - 入口：文件 →「打印…」（Ctrl+Shift+P）；`printSource` 把预览标签解析回其源编辑标签
 - 模式选择：`printModesFor(kind)` —— markdown → `preview`/`raw`（弹 `PrintDialog` 二选一）；html/text → 仅 `raw`（直接打印原文，不询问）
 - 内容构建：`buildPrintContent`（`raw` 走 `rawPrintHtml` 转义；`preview` 需要 `renderedHtml`）+ `buildPrintCss`（`@page` 16mm、分页避让、`print-color-adjust: exact`、`.print-raw` 等宽）；markdown 预览版用 `prepareMarkdownPrint`（渲染 → mermaid 内联 SVG（失败退回代码块）→ `materializeImages` 内联本地图片）
-- 交付方式：`stage_print_doc(title, html)` 写入 Rust 打印槽 → `open_print_window()` 创建/聚焦 `print` 窗口 → 该窗口的 `main.tsx` 按 `getCurrentWindow().label === "print"` 分流渲染 `PrintView` → `take_print_doc()` 取一次（模块级缓存兼容 StrictMode 双调用）→ 渲染后 400ms 自动 `window.print()`，并提供「打印」按钮与 Ctrl+P 兜底；关闭走 `close_print_window`
+- 交付方式：`stage_print_doc(title, html)` 写入 Rust 打印槽 → `open_print_window()` 创建/聚焦 `print` 窗口 → 该窗口的 `main.tsx` 按 `getCurrentWindow().label === "print"` 分流渲染 `PrintView` → `take_print_doc()` 取一次（模块级缓存兼容 StrictMode 双调用）→ 渲染完成后自动调用 **Rust 侧系统打印对话框**，工具栏另有「在浏览器中打印」与「关闭」
+- **系统打印对话框**：`print_window_show_dialog` 通过 `with_webview` 取到 `ICoreWebView2Controller`，`cast::<ICoreWebView2_16>()` 后调用 `ShowPrintUI(COREWEBVIEW2_PRINT_DIALOG_KIND_SYSTEM)`，弹出原生 Windows 打印对话框（本机实测为 `ApplicationFrameWindow`：`Microsoft Edge WebView2 - 打印`），取消/打印后打印窗恢复可用
+- **不使用 `window.print()`**：在 WebView2 中它会切到 Chromium 自带的 `edge://print` 预览页（CDP 实测：目标从我们的文档变为 `edge://print` + `chrome-untrusted://print/…pdf`），该页面在部分运行时上渲染为空白且无法关闭——正是用户报告的“打印页空白且关不掉”
+- **后备路径**：`print_in_browser(title, document_html)` 把 `buildStandalonePrintDocument`（完整 HTML：charset + 标题 + 打印 CSS + 自动打印脚本）写入 `%TEMP%\lexora-print\lexora-<标题>-<时间戳>.html` 并交给默认浏览器打印；该目录每次调用清理 1 天前的自建文件
 - 隔离：打印窗口只加载应用自身资源（CSP 不变），文档内容为纯 HTML（无脚本），本地图片已内联为 data URL
 
 ## 6. 安全与健壮性
@@ -185,7 +188,9 @@ autosave{enabled,intervalSec}、editor{fontFamily,fontSize,lineHeight,tabSize,wo
 - 非 UTF-8 原文不支持原地编辑
 - 无 Windows 10/11 之外的构建目标
 - 窗口开启了 Tauri 的原生拖放（`dragDropEnabled`，文件拖入必需），因此网页层的 HTML5 拖放事件不可用；编辑器内的“拖动选中文本移动”属该限制范围
-- 打印依赖 WebView2 的 `window.print()`（Tauri 文档标注“所有平台可用”）：打印窗口内自动调用一次，失败时可用窗口内「打印」按钮或 Ctrl+P 手动触发；HTML 文件按需求只提供“原始文本”打印
+- 打印走 WebView2 的**系统打印对话框**（`ICoreWebView2_16::ShowPrintUI`，要求运行时 ≥ 1.0.1518）；不支持时工具栏提供「在浏览器中打印」后备路径。**禁止改用 `window.print()`**：那会打开 Chromium 的 `edge://print` 预览页，在部分运行时为空白且无法关闭
+- 任何**创建窗口**的 Tauri 命令必须是 `async`：同步命令在主线程执行，而 `WebviewWindowBuilder::build()`/`Window::destroy()` 会派发回主线程并等待，从主线程调用即死锁整个应用（窗口出现但空白、无法关闭）。`open_print_window`/`close_print_window` 因此为 async 命令
+- HTML 文件按需求只提供“原始文本”打印
 - 文件关联为“回退关联”：Windows 已存在 `.md` 的 UserChoice 时系统优先使用它，此时需在系统默认应用设置中手动指定（设置页提供入口）
 
 ## 8. 目录导览

@@ -4,7 +4,21 @@
 （0.1.9 → 0.2.0）。版本以 `src-tauri/tauri.conf.json` 为当前源，构建前用
 `node scripts/bump-version.mjs` 同步 package.json / Cargo.toml / 两个 lockfile。
 
-## 0.4.0（本轮：文件与打印增强）
+## 0.4.1（打印修复）
+- **修复：打印页空白且无法关闭**。原因有两处：
+  1. `open_print_window` 是同步命令（在主线程执行），而创建窗口需要主线程派发 → 主线程死锁，
+     打印窗出现但从未绘制、整个应用事件循环卡死。现改为 async 命令（`close_print_window` 同）。
+  2. 打印改用 `window.print()` 会切到 Chromium 自带的 `edge://print` 预览页，该页在部分
+     WebView2 运行时上渲染为空白且无法关闭。
+- **打印改为 Windows 系统打印对话框**：打印窗口渲染完成后调用 WebView2 的
+  `ICoreWebView2_16::ShowPrintUI(System)`，弹出原生打印对话框（可取消、可关闭）；
+  取消后打印窗口恢复可操作，主窗口全程不受影响。
+- 打印窗口工具栏：`打印…`（再次打开系统对话框）/ `在浏览器中打印`（后备：把打印页写入
+  `%TEMP%\lexora-print\` 并用默认浏览器打开，其打印预览可正常使用）/ `关闭`；
+  窗口标题随文档名显示。
+- 门禁：vitest 157、tsc 0 错误、cargo test 35、clippy 0 警告。
+
+## 0.4.0（文件与打印增强）
 - **拖放打开**：把文件从资源管理器拖入窗口任意位置即可打开；拖拽时显示浮层提示，
   文件夹与图片/压缩包等非文本文件会被忽略并提示。
 - **从外部打开**：资源管理器“打开方式 → Lexora”与 `lexora.exe <文件>` 命令行参数

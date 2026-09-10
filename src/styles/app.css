@@ -1419,6 +1419,12 @@ button.title-brand {
 .print-toolbar-hint {
   opacity: 0.6;
 }
+.print-notice {
+  padding: 8px 12px;
+  border-bottom: 1px solid #d0d7de;
+  background: #fff8c5;
+  font-size: 12px;
+}
 .print-body {
   padding: 18mm 16mm;
   margin: 0 auto;

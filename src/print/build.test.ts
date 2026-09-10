@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildPrintContent,
   buildPrintCss,
+  buildStandalonePrintDocument,
   escapeHtml,
   printModeLabel,
   printModesFor,
@@ -186,5 +187,43 @@ describe("buildPrintContent", () => {
   it("always returns a stylesheet", () => {
     const content = buildPrintContent({ kind: "text", mode: "raw", title: "a.txt", text: "x" });
     expect(content.css).toContain("@page");
+  });
+});
+
+describe("buildStandalonePrintDocument", () => {
+  const doc = (autoPrint?: boolean): string =>
+    buildStandalonePrintDocument({
+      title: "报告",
+      html: "<h1>标题</h1>",
+      css: "@page { margin: 16mm }",
+      autoPrint,
+    });
+
+  it("produces a complete document with charset, title and styles", () => {
+    const html = doc();
+    expect(html.startsWith("<!DOCTYPE html>")).toBe(true);
+    expect(html).toContain('<meta charset="utf-8" />');
+    expect(html).toContain("<title>报告</title>");
+    expect(html).toContain("@page { margin: 16mm }");
+    expect(html).toContain('<article class="print-body"><h1>标题</h1></article>');
+    expect(html.trimEnd().endsWith("</html>")).toBe(true);
+  });
+
+  it("only adds the auto-print script when asked", () => {
+    expect(doc()).not.toContain("window.print()");
+    expect(doc(true)).toContain("window.print()");
+  });
+
+  it("escapes the title and falls back for an empty one", () => {
+    expect(doc()).toBeTruthy();
+    const evil = buildStandalonePrintDocument({
+      title: '</title><script>alert(1)</script>',
+      html: "",
+      css: "",
+    });
+    expect(evil).not.toContain("<script>alert(1)</script>");
+    expect(evil).toContain("&lt;script&gt;");
+    const empty = buildStandalonePrintDocument({ title: "   ", html: "", css: "" });
+    expect(empty).toContain("<title>未命名文档</title>");
   });
 });

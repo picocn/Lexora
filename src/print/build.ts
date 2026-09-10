@@ -188,3 +188,38 @@ export function buildPrintContent(opts: {
   }
   return { title, html: rawPrintHtml(opts.text ?? ""), css: buildPrintCss() };
 }
+
+/**
+ * Wraps a printable fragment into a complete standalone HTML document, used
+ * when the printout is handed to the system default browser (its own print
+ * preview is a normal closable dialog, unlike WebView2's `edge://print` page).
+ * `autoPrint` asks the browser to open its print dialog as soon as the page
+ * has loaded.
+ */
+export function buildStandalonePrintDocument(opts: {
+  title: string;
+  html: string;
+  css: string;
+  autoPrint?: boolean;
+}): string {
+  const title = escapeHtml(opts.title.trim() || FALLBACK_TITLE);
+  const script = opts.autoPrint
+    ? '<script>addEventListener("load",function(){setTimeout(function(){window.print()},250)})</script>'
+    : "";
+  return [
+    "<!DOCTYPE html>",
+    '<html lang="zh-CN">',
+    "<head>",
+    '<meta charset="utf-8" />',
+    '<meta name="viewport" content="width=device-width, initial-scale=1" />',
+    `<title>${title}</title>`,
+    `<style>${opts.css}</style>`,
+    "</head>",
+    "<body>",
+    `<article class="print-body">${opts.html}</article>`,
+    "</body>",
+    script,
+    "</html>",
+    "",
+  ].join("\n");
+}

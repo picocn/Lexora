@@ -290,6 +290,18 @@ export function takePrintDoc(): Promise<PrintDoc | null> {
   return invoke<PrintDoc | null>("take_print_doc");
 }
 
+/** Opens the system (OS) print dialog for the print window's document. */
+export function printWindowShowDialog(): Promise<void> {
+  return invoke("print_window_show_dialog");
+}
+
+/** Writes the printable document to a temp file and opens it in the default
+ * browser (whose print preview is a normal, closable dialog). Returns the
+ * file path. */
+export function printInBrowser(title: string, html: string): Promise<string> {
+  return invoke<string>("print_in_browser", { title, html });
+}
+
 /** Opens (or focuses) the dedicated print window. */
 export function openPrintWindow(): Promise<void> {
   return invoke("open_print_window");
