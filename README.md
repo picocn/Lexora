@@ -64,5 +64,5 @@ npx tauri build        # 仅构建、不升版本号（通常调试用）
 
 - `src/` React 前端（`components/`、`editor/`、`tabs/`、`preview/`、`ipc/`、`styles/`）
 - `src-tauri/` Rust 后端（`commands/{files,snapshots,settings}.rs`）
-- `docs/` 项目文档：`requirements.zh.md`（需求）、`design.zh.md`（设计）、`acceptance.zh.md`（验收清单）、`release-notes.md`（发布说明）、`large-file-strategy.zh.md`（性能/大文件方案）
+- `docs/` 项目文档：`requirements.zh.md`（需求）、`design.zh.md`（设计）、`acceptance.zh.md`（验收清单）、`release-notes.md`（发布说明）、`large-file-strategy.zh.md`（性能/大文件方案）、`migration-go-wails3.zh.md`（迁移 Go + Wails 3 规划设计）、`TODO.md`（优化需求清单）
 - `scripts/crates-proxy.mjs`、`scripts/gen-icon.mjs`

@@ -1,7 +1,7 @@
 # Lexora 需求文档（Requirements）
 
-- 适用版本：当前实现基线 0.3.9
-- 相关文档：`design.zh.md`（设计）、`acceptance.zh.md`（人工验收清单）、`large-file-strategy.zh.md`（大文件性能方案）、`release-notes.md`（逐版本变更）
+- 适用版本：当前实现基线 0.4.1
+- 相关文档：`design.zh.md`（设计）、`acceptance.zh.md`（人工验收清单）、`large-file-strategy.zh.md`（大文件性能方案）、`release-notes.md`（逐版本变更）、`migration-go-wails3.zh.md`（Go + Wails 3 迁移规划设计）
 
 ## 1. 产品概述
 Lexora 是一款轻量级 Markdown 多标签桌面编辑器，面向个人写作/笔记场景，定位“开箱即用、便携绿色、不丢数据”：

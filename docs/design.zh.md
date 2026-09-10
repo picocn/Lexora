@@ -1,7 +1,7 @@
 # Lexora 设计文档（Design）
 
-- 适用版本：0.3.9
-- 配套：`requirements.zh.md`、`acceptance.zh.md`、`large-file-strategy.zh.md`、`release-notes.md`
+- 适用版本：0.4.1
+- 配套：`requirements.zh.md`、`acceptance.zh.md`、`large-file-strategy.zh.md`、`release-notes.md`、`migration-go-wails3.zh.md`（Go + Wails 3 迁移规划设计）
 
 ## 1. 总体架构
 ```
