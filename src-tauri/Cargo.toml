@@ -1,6 +1,6 @@
 [package]
 name = "lexora"
-version = "0.4.0"
+version = "0.4.1"
 description = "Lexora - lightweight multi-tab markdown editor"
 edition = "2024"
 
@@ -17,6 +17,12 @@ tauri-plugin-dialog = "2"
 tauri-plugin-single-instance = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+
+# WebView2 COM access for the system print dialog (ICoreWebView2_16::ShowPrintUI).
+# Both crates are already in the tree through wry/tauri, so this adds no downloads.
+[target.'cfg(windows)'.dependencies]
+webview2-com = "0.38"
+windows-core = "0.61"
 
 [profile.release]
 codegen-units = 1
