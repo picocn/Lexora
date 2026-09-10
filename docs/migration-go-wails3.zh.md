@@ -9,9 +9,10 @@
 
 1. **可行性：高，但不是零成本替换。** 前端（React + CodeMirror 6 + 预览渲染 + 全部 vitest 用例）可 100% 复用；需要重写的是约 **2.8k 行 Rust 后端**（含测试），预计 Go 侧 **2.5–3.2k 行** + 前端适配层约 250–400 行 + 构建/打包脚本约 300 行。
 2. **最大收益**：构建时间从本机 **4–6 分钟**（cargo release + LTO + 依赖编译）降到 **10–40 秒**（Go 增量编译）；删除为绕过 schannel TLS 问题而存在的 `scripts/crates-proxy.mjs` 中转；后端依赖树从 ~400 个 crate 收敛到个位数 Go 模块；主进程内存与体积通常更小。
-3. **最大风险**：Wails v3 仍是 **beta**（本机 CLI `v3.0.0-beta.16`，最新 `v3.0.0-beta.19`），API 可能漂移；**打印**能力在 Wails 下没有现成的 WebView2 COM 通道（现版本依赖 `ICoreWebView2_16::ShowPrintUI`），需要降级为“默认浏览器打印”或做一次 CGO/COM 验证。
-4. **推荐路径**：**P0 五项能力验证 spike（3–5 天）→ go/no-go → 双后端并行迁移**（前端只依赖一层 `backend` 适配接口，Tauri 与 Wails 两套实现并存，随时可回滚）。不建议一次性替换 `src-tauri/`。
+3. **最大风险**：Wails v3 仍是 **beta 预发布**（官方："beta software with a stable desktop API"，最新 `v3.0.0-beta.19`／2026-09-09，本机 CLI `v3.0.0-beta.16`），API 仍可能在 3.0 正式版前变动；**打印**是唯一能力硬缺口——Wails 的 `WebviewWindow.Print()` 在 Windows 上就是 `execJS("window.print();")`，与本项目已证伪的“空白且无法关闭的 `edge://print` 预览页”同源，必须降级为“默认浏览器打印”或 fork 上游。
+4. **推荐路径**：**P0 八项能力验证 spike（3–5 天）→ go/no-go → 双后端并行迁移**（前端只依赖一层 `backend` 适配接口，Tauri 与 Wails 两套实现并存，随时可回滚）。不建议一次性替换 `src-tauri/`。
 5. **兼容硬约束**：`settings.json` / `window.json` / `session.json` / `autosave/<stem>.md(+.meta.json)` 的**字段名、默认值合并规则、快照文件名哈希算法**必须逐字节兼容，否则用户数据（未保存内容）会在迁移后失联。第 5 节给出可直接落地的 Go 结构体与不变量。
+6. **两处易被忽略的工程约束**：① `wails3 build` 在 Windows **只产 exe、不产安装包**（安装包要 `wails3 package`，且 NSIS 需另装）；② 绑定传输是 JSON + base64、512KB 分片、WebView2 请求体约 2MB 上限，**100MB 级文档需要改走 Stream**（第 6.3 / 8.3 节）。
 
 ---
 
@@ -128,11 +129,13 @@
 |---|---|
 | Go | **go1.26.5 windows/amd64**（≥ Wails 要求 1.25）；`GOPATH=D:\GoPath`；`GOPROXY=https://goproxy.cn,direct` |
 | Go 代理连通性 | `https://goproxy.cn` 200 OK（可取到 `v3.0.0-beta.14…beta.19`）；`proxy.golang.org` 直连超时 → **必须保留 `GOPROXY=goproxy.cn`** |
-| Wails CLI | `D:\GoPath\bin\wails3.exe` 已存在，版本 **v3.0.0-beta.16**（最新 beta.19）；另有 v2 的 `wails.exe` |
+| Wails CLI | `D:\GoPath\bin\wails3.exe` 已存在，版本 **v3.0.0-beta.16**；最新发布 **v3.0.0-beta.19（2026-09-09）**，仍是 GitHub 预发布（v2 才是稳定版）；另有 v2 的 `wails.exe` |
+| Wails 运行要求 | Go **≥ 1.25**（本机 1.26.5 ✓）；Windows 需 WebView2 运行时（安装包内含引导器）；beta 承诺仅覆盖桌面平台（Windows amd64/arm64、macOS、Linux） |
 | `wails3 doctor` | WebView2 **154.0.4258.9**、`Go WebView2Loader=true`、`CGO_ENABLED=0`、Windows 11 25H2 Insider、32GB |
 | 打包依赖 | **NSIS 未安装**（Tauri 自带的 `makensis` 在 `%LOCALAPPDATA%\tauri\NSIS`）；MSIX Packaging Tool / MakeAppx / SignTool 未安装；`%LOCALAPPDATA%\tauri\WixTools314` 存在（原 MSI 用） |
 | 前端工具链 | Node v24.4.1 / npm 11.4.2（不变） |
 | Wails CLI 命令面 | `init`、`build`、`dev`、`package`、`task`、`generate {bindings,models,icons,syso,build-assets,…}`、`doctor`、`setup`、`updater`、`sign` 等 |
+| `wails3 build` 产物 | Windows 下**只产出 `bin\<AppName>.exe`，不含安装包**；安装包需 `wails3 package GOOS=windows`（→ NSIS，输出路径官方文档自相矛盾：`build/windows/nsis/` vs `bin/`，P0 实测确认）；MSIX 走 `FORMAT=msix`（需 `makeappx.exe`）；NSIS 未随 Wails 分发（`winget install NSIS.NSIS`） |
 
 结论：**迁移所需的 Go 与 Wails 工具链已就绪**，唯一需要补的是打包器（NSIS），且可复用 Tauri 已下载的 NSIS 目录（见 8.3）。
 
@@ -151,9 +154,9 @@ lexora.exe（单进程，Go）
 ```
 
 - 多窗口：`app.Window.NewWithOptions(application.WebviewWindowOptions{...})`（`window_manager.go`）；`app.Window.GetByName("print")` 可复用/聚焦已有窗口。
-- **打印窗口的路由标记**：不依赖运行时“当前窗口名”JS API（P0 核实项）。首选把标记放在 URL 上：`NewWithOptions(WebviewWindowOptions{URL: "/?win=print"})`，前端 `main.tsx` 读 `location.search` 分流；备选 `Options.Assets.Handler` 自定义 `/print` 路由返回同一 `index.html`。
+- **打印窗口的路由标记**：三种可行方式（P0 取其一）：① 前端 `import { Window } from "@wailsio/runtime"`（默认导出即当前窗口）→ `await Window.Name()` 判定；② 创建时用不同 URL（`/?win=print`），前端读 `location.search`；③ `Options.Assets.Handler` 自定义 `/print` 路由返回同一 `index.html`。推荐 ①（贴合 Wails 模型），② 作为不依赖运行时 API 的兜底。
 - 无边框：`WebviewWindowOptions{Frameless: true, Width: 1280, Height: 840, MinWidth: 640, MinHeight: 480, StartState: …, Hidden: true}`；启动先 `Hidden` 再应用几何后 `Show()`（等价现在的 `visible:false` 防闪烁）。
-- 拖拽区：CSS `app-region`（Wails 官方无边框方案，WebView2 原生非客户区）替代现在 `mousedown → startDragging()`；`WebviewWindow.startDrag()` 仍可从 Go 调用作为兜底（`webview_window_windows.go:262` 用 `WM_NCLBUTTONDOWN/HTCAPTION`）。双击最大化由 `WebviewWindowOptions` 的标题栏双击动作（`titlebar_doubleclick_action.go`）或前端 `dblclick` 处理。
+- 拖拽区：CSS 自定义属性 **`--wails-draggable: drag | no-drag`**（Wails 内建，与 v2 同款）替代现在 `mousedown → startDragging()`；尺寸调整可用 `--wails-resize: top/bottom/left/right/…`。Windows 另有原生路径：`app-region` + `WindowsWindow{NonClientRegionSupport: true}`（仅拖拽），或实验性的 `--wails-non-client-region: caption|minimize|maximize|close` + `WebView2CompositionHosting: true`（可获 Win11 Snap Layouts）。**双击最大化需自行实现**（运行时只在 macOS 自动处理 `dblclick`），与现有 `App.tsx` 的 `onDoubleClick` 一致。
 - 窗口几何持久化：`WindowDidResize`/`WindowMaximise`/`WindowRestore`/`WindowClosing` 窗口事件（`pkg/events/events.go`：`WindowDidResize=1032`、`WindowMaximise=1039`、`WindowRestore=1042`、`WindowClosing=1030`）→ 捕获 `Bounds()`（逻辑像素）/`IsMaximised()` → 写 `window.json`。
 
 ### 3.2 仓库布局（保持前端目录不变，新增 Go 侧）
@@ -222,7 +225,14 @@ app.Run()
 - 绑定生成：`wails3 generate bindings -ts -d bindings`（`services.go:48 NewService[T]`）；前端拿到类型化函数，例如 `files.ReadTextFile(path)`。
 - 前端运行时包 `@wailsio/runtime` 实测导出：`Application`、`Browser`、`Call`、`Clipboard`、`Create`、`Dialogs`、`Events`、`Flags`、`Screens`、`System`、`Window`、`WML`、`Stream` 等（`internal/runtime/desktop/@wailsio/runtime/src/index.ts`）。
 - **错误语义差异**：Tauri 的 `Err(String)` 会 reject 出字符串；Wails 绑定 reject 的是 `Error` 对象。适配层统一归一化：`err instanceof Error ? err.message : String(err)`，保证现有很多 `打开失败：${e}` 文案不出现 `Error: ` 前缀。
-- **大对象**：Wails v3 提供 stream（`internal/runtime/.../stream.ts`、`pkg/application/stream*.go`）用于大 payload；本项目仍沿用“前端持有文档、只在打开/保存时全量过桥”的现有模型（与 Tauri 相同），不引入 stream，避免大改。
+- **大对象与传输限制（重要）**：绑定调用是 JSON，`[]byte` 会转成 **base64 字符串（+33% 开销）**；单次请求体超过 **512KB 自动分片**，且 WebView2 对请求体有 **~2MB 上限**。因此：
+  - 现有“前端持有文档、只在打开/保存时全量过桥”的模型对普通文档（≤ 数 MB）无碍，但 **100MB 级文档不适合走绑定调用**；
+  - 大文件路径应改用 **Stream**（`app.HandleStream(name, handler)` + Go `*StreamConn.Send/Receive`，前端 `Stream(name)` 返回 WebSocket 子集对象）：Windows 实测 **100 MB/s（Go→JS）**、单帧上限 64MB、每窗口缓冲 8MB，官方建议上传帧 512KB；
+  - P4 基准阶段对“绑定调用 vs Stream”两条路径各测一遍，再决定大文件读取是否切换（当前 Rust/Tauri 也是 JSON，量级相当，属不劣化即可）。
+- **关闭拦截必须用 Hook**：`window.RegisterHook(events.Common.WindowClosing, func(e *application.WindowEvent){ e.Cancel() })` 是**唯一**能阻止关闭的位置（`OnWindowEvent` 只观察、不能取消）——对应现在 Tauri 的 `preventDefault()` + “存会话→同步快照→退出”。
+- 服务是**单例、跨窗口共享**（状态需自行加锁）；服务注册顺序即启动顺序，关闭逆序；因此“会话/快照”这类跨窗口状态应放在单个服务里串行化。
+- **可以完全不用预生成绑定**：`import { Call } from "@wailsio/runtime"` → `Call.ByName("package.struct.method", ...args)`（v2 `window.go` 的等价物）。适配层可以据此写“手写薄封装 + 字符串方法名”，把迁移期对 codegen 的依赖降到最低；正式版再用 `wails3 generate bindings -ts` 得到类型安全绑定。
+- 错误语义：绑定 reject 的是 `TypeError`（参数不匹配）/ **`RuntimeError`（Go 返回 error 或 panic）**/ `ReferenceError`（方法不存在），错误对象带 `name`/`message`/`cause`（Go 错误的 JSON，可能是数组）。适配层统一转成现文案：`err instanceof Error ? err.message : String(err)`，必要时用 `Call.RuntimeError` 区分。
 
 ### 3.4 事件通道（替代 `listen("open-paths")`）
 
@@ -267,15 +277,16 @@ Go 侧发送：`app.Event.Emit("open-paths", paths)`（`event_manager.go: Emit/E
 
 | 能力 | Tauri 现状 | Wails v3 方案 | 迁移动作 | 风险 |
 |---|---|---|---|---|
-| 自绘 36px 顶栏 + 拖拽 | `decorations:false` + `mousedown→startDragging()` | `Frameless:true` + CSS `app-region`（`features/windows/frameless`）；`startDrag()` 可兜底 | 改 `App.tsx` 拖拽区 + `app.css` | 低 |
+| 自绘 36px 顶栏 + 拖拽 | `decorations:false` + `mousedown→startDragging()` | `Frameless:true` + CSS `--wails-draggable: drag/no-drag`；Windows 可选 `NonClientRegionSupport` 原生路径 | 改 `App.tsx` 拖拽区 + `app.css`（加入拖拽区声明） | 低 |
 | 最大化/还原图标与状态 | `isMaximized()` + `onResized` | `IsMaximised()`（`webview_window.go:761`）+ `WindowMaximise/WindowRestore/WindowDidResize` 事件 + `ToggleMaximise()`（:1193） | 改 `App.tsx` 4 处 | 低 |
-| 关闭拦截（退出流程） | `onCloseRequested { preventDefault }` | `common:WindowClosing` 事件 + `Options.ShouldQuit`；`app.Quit()` | Go 侧实现“存会话→同步快照→退出”；删除前端 `exit_app` | 低 |
-| 文件打开/保存对话框 | `@tauri-apps/plugin-dialog` | `app.Dialog.OpenFile()/SaveFile()`（`.AddFilter/.SetFilename/.PromptForMultipleSelection/.AttachToWindow`） | 适配层替换，删插件依赖 | 低 |
+| 关闭拦截（退出流程） | `onCloseRequested { preventDefault }` | **`window.RegisterHook(events.Common.WindowClosing, …)` + `e.Cancel()`**（唯一可取消处）；最终退出 `app.Quit()`；`Options.OnShutdown` 做收尾 | Go 侧实现“存会话→同步快照→退出”；前端不再需要 `exit_app` | 低 |
+| 文件打开/保存对话框 | `@tauri-apps/plugin-dialog` | `app.Dialog.OpenFile()/SaveFile()`（`.AddFilter().SetFilename().PromptForSingleSelection()/PromptForMultipleSelection().AttachToWindow()`，核心内建、无需插件） | 适配层替换，删插件依赖 | 低 |
 | 系统字体对话框 | `comdlg32.ChooseFontW` FFI（179 行） | 自建纯 Go `syscall` 调用（x64 结构体布局已核对：`LOGFONTW`=92B、`CHOOSEFONTW`=104B）；`hwndOwner` 用 `NativeWindow()` 的 HWND | 1:1 移植 + 专用 OS 线程 + 消息泵 | 中 |
-| 文件拖放 | `onDragDropEvent`（Tauri 原生拦截，HTML5 拖放被禁用） | `EnableFileDrop:true`（窗口选项）+ `common:WindowFilesDropped`；**运行时在 DOM 层处理 dragenter/over/drop 并解析路径**，故 HTML5 拖放可用 | 后端做“筛选 + 打开”，前端用标准 DataTransfer 事件驱动浮层 | 低（限制反而消失） |
+| 文件拖放 | `onDragDropEvent`（Tauri 原生拦截，HTML5 拖放被禁用） | `WebviewWindowOptions.EnableFileDrop:true` + `window.OnWindowEvent(events.Common.WindowFilesDropped, …)` → `e.Context().DroppedFiles()`；**运行时在 DOM 层处理拖放并解析路径**，可用 `data-file-drop-target` 属性 + `file-drop-target-active` 悬停类 | 后端做“筛选 + 打开”，前端用 H5 拖放事件驱动浮层 | 低（Tauri 时代的限制消失） |
 | 单实例 + argv 转发 | `tauri-plugin-single-instance` + 自定义队列 | 内置 `SingleInstanceOptions{UniqueID, OnSecondInstanceLaunch, AdditionalData, EncryptionKey}`；`SecondInstanceData{Args, WorkingDir}` | 删自建实现，回调里复用 `launch` 筛选逻辑 | 低 |
 | 文件关联（运行时注册） | 自建 `reg.exe` 计划 + 执行（628 行） | `golang.org/x/sys/windows/registry` 直写 HKCU + `SHChangeNotify(SHCNE_ASSOCCHANGED)`；另可声明式走 `build/config.yml: fileAssociations`（安装时写入） | 移植计划/执行/状态查询；保留 UserChoice 只读与提示 | 中 |
-| 外链 / 浏览器打开 | `rundll32 url.dll,FileProtocolHandler` | `app.Browser.OpenURL(url)` / `OpenFile(path)`（或 `ShellExecuteW`） | 适配层替换 + 保留 http(s) 白名单 | 低 |
+| 外链 / 浏览器打开 | `rundll32 url.dll,FileProtocolHandler` | `app.Browser.OpenURL(url)` / `app.Browser.OpenFile(path)`（无包级 `application.OpenURL`）；定位文件另可 `app.Env.OpenFileManager(path, select)` | 适配层替换 + 保留 http(s) 白名单 | 低 |
+| 绑定传输 | Tauri JSON IPC（同量级） | JSON + 512KB 分片、WebView2 请求体 ~2MB 上限、`[]byte`→base64；大负载走 `Stream`（Windows 100 MB/s） | 大文件读写路径按 P4 基准决定是否改 Stream | 中 |
 | **打印** | `ICoreWebView2_16::ShowPrintUI(SYSTEM)`（可用，见 0.4.1） | `WebviewWindow.Print()` 在 Windows 上仅 `execJS("window.print();")`（`webview_window_windows.go:248`）→ 与已证伪的路径相同，**不可用** | 见决策 **D1** | **高** |
 | 进程内存统计 | PSAPI `GetProcessMemoryInfo` | 自建 `psapi` syscall（`PROCESS_MEMORY_COUNTERS`，`Cb` 必填，SIZE_T→uintptr） | 1:1 移植 | 低 |
 | 窗口图标/DPI/文件属性 | Tauri 打包 | `wails3 generate icons` + `goversioninfo`（.syso，含 manifest/DPI） | 新脚本 | 低 |
@@ -446,7 +457,7 @@ type PrintDoc struct {
 ### 6.3 Go 实现注意事项
 
 1. **零拷贝**：`os.ReadFile` 得到 `[]byte` 后转字符串用 `unsafe.String(&b[0], len(b))`（需保证此后不再写 `b`；或用 `strings.Clone` 换取安全），避免 100MB 级别多一次全量拷贝。
-2. **IPC 序列化成本**：返回大文件内容会经历一次 JSON 编码 + 前端解析（Wails 与 Tauri 相同量级）。避免在 Go 侧构造中间 `map[string]any` 再编码；直接用结构体。
+2. **IPC 序列化成本与传输上限**：Wails 绑定是 JSON + `[]byte`→base64；单次请求体 >512KB 自动分片，WebView2 对请求体上限约 2MB；大负载应走 `Stream`（Windows 实测 100 MB/s Go→JS，单帧上限 64MB，官方建议上传帧 512KB）。Go 侧避免构造中间 `map[string]any` 再编码，直接用结构体；100MB 级文档在 P4 用“绑定调用 vs Stream”两条路径实测后再定。
 3. **GC 与内存上限**：可用 `debug.SetMemoryLimit`（Go 1.19+）模拟现有 L3 的“内存天花板”，并在基准中确认峰值；`GOGC` 默认 100 可能在 100MB 文档下产生较大堆，必要时配合 `runtime/debug.FreeOSMemory()` 在卸载标签后主动归还。
 4. **前端仍是内存主体**：WebView2 子进程承载 CodeMirror 文档，迁移前后这部分开销不变；`process_mem_kb` 只统计主进程工作集，基准脚本应继续统计**进程树**（含 `msedgewebview2.exe`）。
 5. **基准复测**：沿用 `D:\lexora-bench` 的 `bench-targets.json` 通道（Go 版 `bench_targets`/`process_mem_kb` 复刻），对 20×20MB 与 10×100MB 各跑一轮，产出与 6.2 同格式的对照表，写入 `docs/large-file-strategy.zh.md` 新增小节。
@@ -485,9 +496,10 @@ type PrintDoc struct {
 | 环节 | 现状（Tauri） | 迁移后（Wails 3） |
 |---|---|---|
 | 初始化 | 已有 `src-tauri/` | `wails3 init -n lexora -t react`（模板列表实测：`react` = React + TypeScript + Vite；另有 `vanilla`/`vue`/`svelte` 等），生成骨架后并入本仓库并保留 `src/`、`dist/` |
-| 开发 | `npm run dev` + `npx tauri dev` | `wails3 dev`（内部起 vite dev server，端口需与 `vite.config.ts` 一致） |
-| 绑定 | 手写 `invoke(name, args)` | `wails3 generate bindings -ts -d bindings`（改 Go 服务后重新生成，前端类型安全） |
-| 构建 | `npm run build` + `npx tauri build` | `wails3 build`（把前端产物内嵌进 exe）/ `wails3 package`（安装包） |
+| 开发 | `npm run dev` + `npx tauri dev` | `wails3 dev`（反向代理 Vite，端口默认 **9245**，用 `WAILS_VITE_PORT` 或 `--port` 覆盖；`vite.config.ts` 需 `server: { host: "127.0.0.1", port: Number(process.env.WAILS_VITE_PORT) || 9245, strictPort: true }`）；Go 变更自动重启并重生成绑定 |
+| 绑定 | 手写 `invoke(name, args)` | `wails3 generate bindings -ts -d bindings`（改 Go 服务后重新生成，前端类型安全）；`wails3 dev` 期间自动重生成 |
+| 构建 | `npm run build` + `npx tauri build` | `wails3 build`（把前端产物内嵌进 exe，产物为 `bin\lexora.exe`） |
+| 资源服务 | Tauri asset 协议 `tauri://localhost` | `//go:embed dist` + `Assets: application.AssetOptions{Handler: application.AssetFileServerFS(assets)}`，URL 为 **`http://wails.localhost/`** |
 | 构建耗时 | 本机 4–6 min（首次更久） | 预计首次 1–2 min，增量 10–40s |
 | TLS 绕行 | 需 `node scripts/crates-proxy.mjs` | **删除**（Go 走 `GOPROXY=https://goproxy.cn,direct`，本机实测可用） |
 
@@ -501,7 +513,7 @@ type PrintDoc struct {
 | `build/config.yml` | 安装包元数据（`productName`/`productVersion`/输出文件名） | **新增** |
 | `build/windows/versioninfo.json` | exe 文件属性与产品版本（配合 `goversioninfo` 生成 `.syso`） | **新增** |
 | ~~`src-tauri/tauri.conf.json`~~ / ~~`Cargo.toml`~~ / ~~`Cargo.lock`~~ | — | **删除** |
-| Go 侧版本 | `-ldflags "-X main.version=1.2.3"`（构建脚本注入，不落盘） | **新增** |
+| Go 侧版本 | 构建时注入（**注意 `wails3 build` 不接受 `-ldflags`/`-o`**：需改 `Taskfile.yml` 的 build 任务，或发布时直接调用 `go build -ldflags "-X main.version=…"`） | **新增** |
 
 脚本改造要点：`replaceCargoTomlVersion` / `replaceCargoLockVersion` 替换为 `replaceConfigYml`（YAML 文本替换，保留注释与缩进）与 `replaceVersionInfoJson`（四段版本 `1.2.3.0`），可选重新生成 `.syso`。
 
@@ -511,10 +523,13 @@ type PrintDoc struct {
 
 | 产物 | 方案 | 备注 |
 |---|---|---|
-| 便携 exe | `wails3 build` | exe 旁置 `settings/`、`autosave/` 语义不变 |
-| NSIS 安装包 | `wails3 package`（需 NSIS） | ① 安装 NSIS ② 或把 `%LOCALAPPDATA%\tauri\NSIS` 加入 PATH；文件关联由 NSIS 脚本在安装时写入 |
-| MSI | 决策 **D3** | ① 沿用 WiX（`%LOCALAPPDATA%\tauri\WixTools314` 已存在）自建 `.wxs` + `candle/light` ② 走 MSIX（需额外工具链）③ 暂不产出 |
+| 便携 exe | `wails3 build` → `bin\lexora.exe` | **不含安装包**；exe 旁置 `settings/`、`autosave/` 语义不变 |
+| NSIS 安装包 | `wails3 package GOOS=windows`（内部走 `wails3 task windows:package`） | NSIS **未随 Wails 分发**（`winget install NSIS.NSIS`，或复用 `%LOCALAPPDATA%\tauri\NSIS`）；输出路径官方文档冲突（`build/windows/nsis/` vs `bin/`）→ P0 实测锁定；文件关联由 NSIS 脚本在安装时写入 |
+| MSIX | `wails3 package GOOS=windows FORMAT=msix`（需 `makeappx.exe`，`wails3 task install:msix:tools`） | 决策 **D3** 的备选 |
+| MSI | 决策 **D3** | ① 沿用 WiX（`%LOCALAPPDATA%\tauri\WixTools314` 已存在）自建 `.wxs` + `candle/light` ② 用 MSIX 替代 ③ 暂不产出 |
 | 代码签名 | `wails3 sign` / `signtool` | 与现状一致（当前未签名，首次运行仍有 SmartScreen 提示） |
+
+> 注意：`wails3 build` 与 `wails3 package` 的产物集合与 Tauri 的 `msi + nsis-setup + exe` **不等价**，`acceptance.zh.md` 的构建门禁条目必须按 D3 结论重写。
 
 ### 8.4 图标与资源
 
@@ -592,6 +607,9 @@ type PrintDoc struct {
 | R8 | 双轨维护成本（迁移期同时维护两套后端） | 中 | 中 | 适配层隔离 + 迁移期冻结新功能 + 上限 4 周 | 双轨超期 |
 | R9 | Go 代理/网络（`proxy.golang.org` 超时） | 低 | 低 | 固定 `GOPROXY=https://goproxy.cn,direct`（本机已配置且实测可用） | 代理不可用 |
 | R10 | 拖放语义变化（HTML5 拖放重新可用，可能与编辑器内文本拖拽冲突） | 低 | 中 | 仅在文件拖放场景 `preventDefault`；回归验证 CodeMirror 文本拖拽 | 编辑器内拖拽失效 |
+| R11 | 绑定传输上限（JSON + base64、512KB 分片、WebView2 ~2MB 请求体）影响大文件 | 中 | 中 | P4 对“绑定调用 vs Stream”各测一遍；必要时大文件路径改 Stream（Windows 100 MB/s） | 100MB 文档打开耗时/内存劣化 >20% |
+| R12 | 无插件生态、服务为跨窗口单例（状态竞争） | 中 | 中 | 全部系统能力自建为 Go 服务；共享状态用互斥/串行化；不使用 `chan`/`func` 跨绑定 | 出现数据竞争（`-race` 检出） |
+| R13 | beta 期间文档与实现冲突/未文档化行为（如 `wails3 package` 输出路径、`Print()` 语义、CSP 缺位） | 中 | 高 | 一律以 **本机源码 + P0 实测** 为准（本文档第 3–4 节已按源码核对）；把 P0 结论写回文档 | 连续两处与文档不符且影响方案 |
 
 ---
 
@@ -609,6 +627,8 @@ type PrintDoc struct {
 | 4. 打印（D1）：应用内预览窗口 + 浏览器交接打印 | Edge 打印预览可用、可取消；无空白无法关闭窗口 |
 | 5. 文件对话框 + 字体对话框（`ChooseFontW` 结构体布局） | 对话框正常，CJK 字体名往返正确 |
 | 6. 资产/CSP：`AssetOptions.Middleware` 注入 CSP 后页面功能无损 | 与现 CSP 等价且 KaTeX/Mermaid/内联样式正常 |
+| 7. 打包链路：`wails3 build` / `wails3 package GOOS=windows` 实际产物与输出路径；NSIS 取得方式 | 产出 exe + 安装包，路径写入文档（决定 D3） |
+| 8. 大负载传输：绑定调用与 Stream 各测一次（1 个 ~100MB 文件） | 打开耗时/内存不劣于 Rust 基线（决定 P4 策略） |
 
 退出条件：6 项全部通过 → 进入 P1；第 4 项不满足需求 → 决策是否走方案 B（fork）或调整需求。
 
@@ -713,7 +733,8 @@ type PrintDoc struct {
 
 ## 附录 C · 参考资料
 
-- Wails v3（beta）官网：<https://v3.wails.io/>　· 无边框窗口：<https://v3.wails.io/features/windows/frameless/>　· 文件关联：<https://v3.wails.io/guides/file-associations/>　· 单实例：<https://v3.wails.io/guides/single-instance/>　· Windows 打包：<https://v3.wails.io/guides/build/windows/>　· 安全建议：<https://v3.wails.io/guides/security>
+- Wails v3（beta）官网：<https://v3.wails.io/>　· 无边框窗口：<https://v3.wails.io/features/windows/frameless/>　· 窗口选项：<https://v3.wails.io/features/windows/options/>　· 文件关联：<https://v3.wails.io/guides/file-associations/>　· 单实例：<https://v3.wails.io/guides/single-instance/>　· 文件拖放：<https://v3.wails.io/features/drag-and-drop/files/>　· 流式传输：<https://v3.wails.io/guides/streams/>　· 绑定与方法：<https://v3.wails.io/features/bindings/methods/>　· 前端运行时：<https://v3.wails.io/reference/frontend-runtime/>　· 项目结构：<https://v3.wails.io/guides/dev/project-structure/>　· Windows 打包：<https://v3.wails.io/guides/build/windows/>　· CLI：<https://v3.wails.io/reference/cli/>　· 安全建议：<https://v3.wails.io/guides/security/>
+- 源码/文档原始路径（注意：仓库默认分支是 **master**，v3 在 `v3/` 子目录；`tree/v3` 是 404）：`https://github.com/wailsapp/wails/tree/master/v3`、原始 MDX：`https://raw.githubusercontent.com/wailsapp/wails/master/v3/docs/src/content/docs/...`；Go 模块：`github.com/wailsapp/wails/v3`（当前最新 `v3.0.0-beta.19`，2026-09-09）
 - 本机源码核对：`D:\GoPath\pkg\mod\github.com\wailsapp\wails\v3@v3.0.0-beta.16\pkg\application`（`window_manager.go`、`webview_window.go`、`webview_window_options.go`、`webview_window_windows.go`、`single_instance.go`、`dialog_manager.go`、`browser_manager.go`、`application_options.go`）与 `pkg\events\events.go`
 - Go 侧 Win32：`golang.org/x/sys/windows/registry`、`ChooseFontW`(comdlg32)、`ShellExecuteW`/`SHChangeNotify`(shell32)、`GetProcessMemoryInfo`(psapi)
 - 本项目现状依据：`docs/design.zh.md`、`docs/large-file-strategy.zh.md`、`docs/acceptance.zh.md`、`src-tauri/src/commands/*`
