@@ -120,9 +120,29 @@ impl Default for ThemeSettings {
 
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
+pub struct FilesSettings {
+    /// Poll opened files for outside modifications and offer a reload.
+    #[serde(default = "default_true")]
+    pub watch_external: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+impl Default for FilesSettings {
+    fn default() -> Self {
+        FilesSettings { watch_external: true }
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
 pub struct AppSettings {
     #[serde(default)]
     pub autosave: AutosaveSettings,
+    #[serde(default)]
+    pub files: FilesSettings,
     #[serde(default)]
     pub editor: EditorSettings,
     #[serde(default)]
@@ -141,6 +161,7 @@ impl Default for AppSettings {
     fn default() -> Self {
         AppSettings {
             autosave: AutosaveSettings::default(),
+            files: FilesSettings::default(),
             editor: EditorSettings::default(),
             preview: PreviewSettings::default(),
             theme: ThemeSettings::default(),
@@ -222,6 +243,7 @@ pub fn read_settings(app: AppHandle) -> Result<AppSettings, String> {
         } else {
             def.layout
         },
+        files: FilesSettings { watch_external: stored.files.watch_external },
         recent_files: stored.recent_files.into_iter().take(20).collect(),
     })
 }
@@ -279,6 +301,16 @@ mod tests {
         assert_eq!(s.theme.kind, "builtin");
         assert_eq!(s.layout, "split");
         assert!(s.recent_files.is_empty());
+        assert!(s.files.watch_external, "missing files section must default to watching");
+    }
+
+    #[test]
+    fn files_settings_round_trips_and_can_be_disabled() {
+        let raw = r#"{ "files": { "watchExternal": false } }"#;
+        let s = parse_like_read(raw);
+        assert!(!s.files.watch_external);
+        let json = serde_json::to_string(&s).unwrap();
+        assert!(json.contains("\"watchExternal\":false"));
     }
 
     #[test]

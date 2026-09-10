@@ -37,7 +37,29 @@ import {
   benchTargets,
   processMemKb,
   DEFAULT_SETTINGS,
+  fileStat,
+  classifyPaths,
+  takeLaunchPaths,
+  onOpenPaths,
+  assocStatus,
+  registerMdAssociation,
+  unregisterMdAssociation,
+  openDefaultAppsSettings,
+  stagePrintDoc,
+  openPrintWindow,
+  type AssocStatus,
 } from "./ipc/commands";
+import { statsDiffer, type FileStat } from "./files/externalChange";
+import { isProbablyBinaryFile, normalizePathList, dropSummary } from "./files/dropPaths";
+import {
+  buildPrintContent,
+  printModesFor,
+  type PrintKind,
+  type PrintMode,
+} from "./print/build";
+import { prepareMarkdownPrint } from "./print/prepare";
+import { ExternalChangeDialog } from "./components/ExternalChangeDialog";
+import { PrintDialog } from "./components/PrintDialog";
 import type { TabsState, Tab } from "./tabs/types";
 import { tabDirty, tabText, isPreview, isEditor } from "./tabs/types";
 import * as store from "./tabs/store";
@@ -147,6 +169,12 @@ function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+/** Last path segment of a Windows or POSIX path. */
+function baseNameOf(p: string): string {
+  const i = Math.max(p.lastIndexOf("\\"), p.lastIndexOf("/"));
+  return i >= 0 ? p.slice(i + 1) : p;
+}
+
 /** Counts how many times `query` matches in the editor state's document
  * (used for the replace-all confirmation). Case/whole-word/regexp aware and
  * non-overlapping, mirroring CodeMirror's own matching semantics. */
@@ -210,6 +238,34 @@ export default function App() {
   /** Brand dropdown (logo + app name click reveals 文件/编辑/帮助). */
   const [brandMenuOpen, setBrandMenuOpen] = useState(false);
   const brandRef = useRef<HTMLDivElement | null>(null);
+  /** Paths currently being dragged over the window (drop overlay). */
+  const [dropPaths, setDropPaths] = useState<string[]>([]);
+  /** Pending "file changed on disk" prompt. */
+  const [externalAsk, setExternalAsk] = useState<{
+    path: string;
+    title: string;
+    dirty: boolean;
+    stat: FileStat;
+  } | null>(null);
+  /** Pending print mode choice (Markdown only). */
+  const [printAsk, setPrintAsk] = useState<{
+    tabId: string;
+    title: string;
+    kind: PrintKind;
+    modes: PrintMode[];
+  } | null>(null);
+  /** .md association state shown in the settings dialog. */
+  const [assoc, setAssoc] = useState<AssocStatus | null>(null);
+  /** Last observed on-disk stat per path (baseline for change detection). */
+  const diskStatRef = useRef<Map<string, FileStat>>(new Map());
+  const externalAskRef = useRef<typeof externalAsk>(null);
+  const externalQueueRef = useRef<NonNullable<typeof externalAsk>[]>([]);
+  const externalPendingRef = useRef<Set<string>>(new Set());
+  /** L1 confirmations queue (several large files dropped at once). */
+  const bigAskQueueRef = useRef<{ path: string; read: FileReadResult }[]>([]);
+  const bigAskRef = useRef<{ path: string; read: FileReadResult } | null>(null);
+  /** True while some other dialog is open (gates new external-change prompts). */
+  const modalsBusyRef = useRef(false);
 
   useEffect(() => {
     if (!brandMenuOpen) return;
@@ -284,6 +340,24 @@ export default function App() {
     },
     [],
   );
+
+  /** Files above the L1 threshold are confirmed one at a time; extra ones
+   * (e.g. several large files dropped together) wait in a queue. */
+  const queueBigFileAsk = useCallback((item: { path: string; read: FileReadResult }) => {
+    if (bigAskRef.current) {
+      bigAskQueueRef.current.push(item);
+      return;
+    }
+    bigAskRef.current = item;
+    setBigFileAsk(item);
+  }, []);
+
+  /** Closes the current L1 prompt and shows the next queued one, if any. */
+  const shiftBigFileAsk = useCallback(() => {
+    const next = bigAskQueueRef.current.shift() ?? null;
+    bigAskRef.current = next;
+    setBigFileAsk(next);
+  }, []);
 
   const tabsRef = useRef(tabsState);
   tabsRef.current = tabsState;
@@ -537,6 +611,10 @@ export default function App() {
         });
       });
       if (opts?.recent !== false) pushRecent(path);
+      // Baseline for the "changed on disk" watcher (best effort).
+      void fileStat(path)
+        .then((st) => diskStatRef.current.set(path, st))
+        .catch(() => {});
     },
     [prefs, themeExt, pushRecent],
   );
@@ -548,7 +626,7 @@ export default function App() {
       try {
         const r = await readTextFile(path);
         if (r.byteLen > LARGE_FILE_WARN_BYTES) {
-          setBigFileAsk({ path, read: r });
+          queueBigFileAsk({ path, read: r });
           return;
         }
         await openLoaded(path, r, true);
@@ -556,7 +634,7 @@ export default function App() {
         setNotice(`打开失败：${e}`);
       }
     },
-    [openLoaded],
+    [openLoaded, queueBigFileAsk],
   );
 
   const onOpen = useCallback(async () => {
@@ -564,7 +642,7 @@ export default function App() {
     if (!picked) return;
     if ("read" in picked) {
       if (picked.read.byteLen > LARGE_FILE_WARN_BYTES) {
-        setBigFileAsk({ path: picked.path, read: picked.read });
+        queueBigFileAsk({ path: picked.path, read: picked.read });
         return;
       }
       await openLoaded(picked.path, picked.read, true);
@@ -572,20 +650,285 @@ export default function App() {
     }
     const reason = "error" in picked ? `：${picked.error}` : "";
     setNotice(`读取 ${picked.path} 失败${reason}`);
-  }, [openLoaded]);
+  }, [openLoaded, queueBigFileAsk]);
 
   const confirmOpenBig = useCallback(() => {
-    const ask = bigFileAsk;
+    const ask = bigAskRef.current;
+    shiftBigFileAsk();
     if (!ask) return;
-    setBigFileAsk(null);
     void openLoaded(ask.path, ask.read, false).then(() => {
       showNotice(`已在后台打开大文件（未切换标签）：${ask.path.split(/[\\/]/).pop()}`);
     });
-  }, [bigFileAsk, openLoaded, showNotice]);
+  }, [openLoaded, shiftBigFileAsk, showNotice]);
 
   const onNew = useCallback(() => {
     setTabsState((prev) => store.newUntitled(prev, { theme: themeExt, prefs }));
   }, [prefs, themeExt]);
+
+  // ---- drag & drop -----------------------------------------------------------
+  /** Opens files dropped onto the window (folders and obvious binaries are
+   * ignored with a notice). */
+  const handleDroppedPaths = useCallback(
+    async (paths: string[]) => {
+      const list = normalizePathList(paths);
+      if (!list.length) return;
+      let existing: string[] = list;
+      try {
+        const infos = await classifyPaths(list);
+        existing = infos.filter((i) => i.kind === "file").map((i) => i.path);
+      } catch {
+        /* not in tauri: fall back to the raw list */
+      }
+      const openable = existing.filter((p) => !isProbablyBinaryFile(baseNameOf(p)));
+      const skipped = list.length - openable.length;
+      if (skipped > 0) showNotice(`已忽略 ${skipped} 个文件夹或非文本文件`, 4000);
+      for (const p of openable) await openUserFile(p);
+    },
+    [openUserFile, showNotice],
+  );
+
+  useEffect(() => {
+    let un: (() => void) | null = null;
+    let disposed = false;
+    void (async () => {
+      try {
+        const { getCurrentWebview } = await import("@tauri-apps/api/webview");
+        const u = await getCurrentWebview().onDragDropEvent((ev) => {
+          const payload = ev.payload;
+          // "over" only carries a position; "enter" is the payload with paths.
+          if (payload.type === "over") return;
+          if (payload.type === "enter") {
+            setDropPaths(normalizePathList(payload.paths));
+            return;
+          }
+          setDropPaths([]);
+          if (payload.type === "drop") void handleDroppedPaths(payload.paths);
+        });
+        if (disposed) u();
+        else un = u;
+      } catch {
+        /* browser preview: no native drag events */
+      }
+    })();
+    return () => {
+      disposed = true;
+      un?.();
+    };
+  }, [handleDroppedPaths]);
+
+  // ---- files handed to the app from outside ----------------------------------
+  /** Opens files passed on the command line (Explorer "打开方式") or
+   * forwarded by a second launch. */
+  const openLaunchPaths = useCallback(
+    async (paths: string[]) => {
+      const list = normalizePathList(paths);
+      if (!list.length) return;
+      for (const p of list) await openUserFile(p);
+      showNotice(`已打开外部传入的 ${list.length} 个文件`, 4000);
+    },
+    [openUserFile, showNotice],
+  );
+
+  useEffect(() => {
+    let un: (() => void) | null = null;
+    let disposed = false;
+    void (async () => {
+      try {
+        const u = await onOpenPaths((paths) => void openLaunchPaths(paths));
+        if (disposed) u();
+        else un = u;
+      } catch {
+        /* browser preview */
+      }
+    })();
+    return () => {
+      disposed = true;
+      un?.();
+    };
+  }, [openLaunchPaths]);
+
+  // ---- external modification detection ---------------------------------------
+  /** Polls the on-disk stat of every open file and queues a reload prompt when
+   * it changed outside Lexora. The observed stat becomes the new baseline as
+   * soon as it is reported, so a single change prompts exactly once. */
+  const checkExternalChanges = useCallback(async () => {
+    const paths = new Set<string>();
+    for (const t of tabsRef.current.tabs) {
+      if (isEditor(t) && !t.unloaded && t.model.path) paths.add(t.model.path);
+    }
+    for (const p of paths) {
+      let st: FileStat;
+      try {
+        st = await fileStat(p);
+      } catch {
+        continue;
+      }
+      const recorded = diskStatRef.current.get(p) ?? null;
+      if (!statsDiffer(recorded, st)) continue;
+      diskStatRef.current.set(p, st);
+      if (externalPendingRef.current.has(p)) continue;
+      const tab = store.findByPath(tabsRef.current, p);
+      if (!tab) continue;
+      externalPendingRef.current.add(p);
+      const item = { path: p, title: tab.model.title, dirty: tabDirty(tab), stat: st };
+      if (externalAskRef.current || modalsBusyRef.current) {
+        externalQueueRef.current.push(item);
+      } else {
+        externalAskRef.current = item;
+        setExternalAsk(item);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!settings) return;
+    if (settings.files?.watchExternal === false) return;
+    const timer = window.setInterval(() => void checkExternalChanges(), 3000);
+    return () => window.clearInterval(timer);
+  }, [settings, checkExternalChanges]);
+
+  /** While another dialog is open, change prompts wait in the queue instead of
+   * stacking on top of it. */
+  const modalsBusy = Boolean(
+    showSettings || infoDialog || confirmClose || replaceConfirmCount != null || bigFileAsk || printAsk,
+  );
+  modalsBusyRef.current = modalsBusy;
+  useEffect(() => {
+    if (modalsBusyRef.current || externalAskRef.current) return;
+    const next = externalQueueRef.current.shift();
+    if (next) {
+      externalAskRef.current = next;
+      setExternalAsk(next);
+    }
+  }, [modalsBusy, externalAsk]);
+
+  /** Answers the current "changed on disk" prompt (and shows the next one). */
+  const resolveExternalAsk = useCallback(
+    async (reload: boolean) => {
+      const ask = externalAskRef.current;
+      const next = externalQueueRef.current.shift() ?? null;
+      externalAskRef.current = next;
+      setExternalAsk(next);
+      if (!ask) return;
+      externalPendingRef.current.delete(ask.path);
+      if (!reload) {
+        showNotice(`已保留当前内容：${ask.title}`, 3000);
+        return;
+      }
+      const tab = store.findByPath(tabsRef.current, ask.path);
+      if (!tab) return;
+      try {
+        const r = await readTextFile(ask.path);
+        const override = tab.model.languageOverride;
+        const langExt = override
+          ? await languageForOverride(override)
+          : await languageForFile(ask.path);
+        const veryLarge = r.content.length >= UNLOAD_BIG_CHARS;
+        setTabsState((prev) =>
+          store.reloadBigTab(prev, tab.model.id, {
+            path: ask.path,
+            diskContent: r.content,
+            utf8Ok: r.utf8Ok,
+            utf8Bom: r.utf8Bom,
+            content: r.content,
+            langExt,
+            theme: themeExt,
+            prefs,
+            noHistory: veryLarge,
+          }),
+        );
+        const st = await fileStat(ask.path);
+        diskStatRef.current.set(ask.path, st);
+        try {
+          await snapshotRemove(tab.model.docKey);
+        } catch {
+          /* no snapshot: fine */
+        }
+        showNotice(`已从磁盘重新加载：${ask.title}`, 4000);
+      } catch (e) {
+        setNotice(`重新加载失败：${e}`);
+      }
+    },
+    [prefs, themeExt, showNotice],
+  );
+
+  // ---- printing ---------------------------------------------------------------
+  /** Editor tab that print acts on (a preview tab resolves to its source). */
+  const printSource = useMemo(() => {
+    if (!activeTab) return undefined;
+    if (isPreview(activeTab)) {
+      return activeTab.model.sourceTabId
+        ? store.getTab(tabsState, activeTab.model.sourceTabId)
+        : undefined;
+    }
+    return isEditor(activeTab) ? activeTab : undefined;
+  }, [activeTab, tabsState]);
+
+  /** Stages the printable document and opens the dedicated print window. */
+  const runPrint = useCallback(
+    async (tabId: string, kind: PrintKind, mode: PrintMode) => {
+      const tab = store.getTab(tabsRef.current, tabId);
+      if (!tab || !isEditor(tab)) return;
+      const text = tabText(tab);
+      const title = `${store.stem(tab.model.title)} - 打印`;
+      try {
+        const renderedHtml =
+          kind === "markdown" && mode === "preview"
+            ? await prepareMarkdownPrint(text, tab.model.path)
+            : undefined;
+        const content = buildPrintContent({ kind, mode, title, renderedHtml, text });
+        await stagePrintDoc(content.title, content.html);
+        await openPrintWindow();
+      } catch (e) {
+        setNotice(`打印失败：${e}`);
+      }
+    },
+    [],
+  );
+
+  /** 文件→打印：Markdown 先让用户选择“预览版 / 原始文本”，其它文本直接打印原文。 */
+  const requestPrint = useCallback(() => {
+    const tab = printSource;
+    if (!tab) {
+      setNotice("当前没有可打印的文档。");
+      return;
+    }
+    const kind: PrintKind =
+      previewKindOf(tab.model.title, tab.model.languageOverride) ?? "text";
+    const modes = printModesFor(kind);
+    if (modes.length <= 1) {
+      void runPrint(tab.model.id, kind, modes[0]);
+      return;
+    }
+    setPrintAsk({ tabId: tab.model.id, title: tab.model.title, kind, modes });
+  }, [printSource, runPrint]);
+
+  // ---- .md file association (Windows) ----------------------------------------
+  const refreshAssoc = useCallback(async () => {
+    try {
+      setAssoc(await assocStatus());
+    } catch {
+      setAssoc(null);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (showSettings) void refreshAssoc();
+  }, [showSettings, refreshAssoc]);
+
+  const onAssocRegister = useCallback(async () => {
+    setAssoc(await registerMdAssociation());
+    showNotice("已注册为 .md 默认打开方式（若系统已指定用户选择，请在 Windows 默认应用中确认）", 6000);
+  }, [showNotice]);
+
+  const onAssocUnregister = useCallback(async () => {
+    setAssoc(await unregisterMdAssociation());
+    showNotice("已取消 .md 关联注册", 4000);
+  }, [showNotice]);
+
+  const onOpenDefaultApps = useCallback(async () => {
+    await openDefaultAppsSettings();
+  }, []);
 
   /** Activates a tab; an unloaded very-large tab is reloaded from disk first
    * (L3) with a short "正在加载…" hint. */
@@ -666,6 +1009,15 @@ export default function App() {
       const oldKey = tab.model.docKey;
       const newBom = sameFile && tab.model.utf8Bom;
       setTabsState((prev) => store.markSaved(prev, tab.model.id, target, content, newBom));
+      // 另存为后按新文件名重新识别语言，避免新建文件存为 .md 后仍是纯文本。
+      if (!tab.model.languageOverride) {
+        const langExt = await languageForFile(target);
+        setTabsState((prev) => store.applyLanguage(prev, tab.model.id, langExt));
+      }
+      // New baseline for the external-change watcher (we wrote this ourselves).
+      void fileStat(target)
+        .then((st) => diskStatRef.current.set(target, st))
+        .catch(() => {});
       // Awaited so the stale snapshot is gone before the process can exit
       // (prevents resurrecting older content on the next launch).
       try {
@@ -933,7 +1285,7 @@ export default function App() {
       const k = e.key.toLowerCase();
       // While a modal is open, editor/app shortcuts must not fire on the tab
       // underneath it (e.g. Ctrl+W closing a tab below the settings dialog).
-      if (showSettings || infoDialog || confirmClose || replaceConfirmCount != null || bigFileAsk) return;
+      if (showSettings || infoDialog || confirmClose || replaceConfirmCount != null || bigFileAsk || printAsk || externalAsk) return;
       if (mod && k === "s") {
         e.preventDefault();
         if (e.shiftKey) void onSaveAs();
@@ -952,7 +1304,8 @@ export default function App() {
         setShowSettings(true);
       } else if (mod && k === "p") {
         e.preventDefault();
-        if (activePreviewKind) onPreview();
+        if (e.shiftKey) requestPrint();
+        else if (activePreviewKind) onPreview();
       } else if (mod && k === "f") {
         // Ctrl+F: open the search panel. Inside the editor (or its panel) the
         // CodeMirror keymap already handles it - only route when focus is
@@ -983,12 +1336,15 @@ export default function App() {
     cycleLayout,
     activePreviewKind,
     onPreview,
+    requestPrint,
     onFind,
     showSettings,
     infoDialog,
     confirmClose,
     replaceConfirmCount,
     bigFileAsk,
+    printAsk,
+    externalAsk,
   ]);
 
   // ---- language override -------------------------------------------------------
@@ -1154,6 +1510,8 @@ export default function App() {
   // 标签要用真实的主题/字体，且 session 激活、默认新建标签等收尾逻辑不能因
   // settings 提交导致的 effect 清理（cancelled）而被跳过。
   const startupRestoreDone = useRef(false);
+  /** Command-line / "open with" files are opened exactly once per launch. */
+  const launchPathsHandledRef = useRef(false);
   useEffect(() => {
     if (!settings) return; // wait for the settings boot
     if (startupRestoreDone.current) return;
@@ -1266,6 +1624,20 @@ export default function App() {
       } catch {
         /* not in tauri */
       }
+      // Files handed to this launch from outside (Explorer "打开方式", CLI arg).
+      // Deliberately NOT gated on `cancelled`: restoring tabs pushes recent
+      // files, which updates `settings` and therefore re-runs this effect's
+      // cleanup (cancelling the in-flight body) before the command-line files
+      // would be opened. A ref keeps it strictly once.
+      if (!launchPathsHandledRef.current) {
+        launchPathsHandledRef.current = true;
+        try {
+          const pending = await takeLaunchPaths();
+          if (pending.length) await openLaunchPaths(pending);
+        } catch {
+          /* not in tauri */
+        }
+      }
       // 启动后若仍没有任何标签页（既无打开文件也无快照恢复），默认新建一个
       // 未命名标签并进入编辑模式。函数式更新保证只在标签列表为空时创建。
       if (!cancelled) {
@@ -1325,6 +1697,13 @@ export default function App() {
             disabled: !activePreviewKind,
             onAction: onPreview,
           },
+          {
+            type: "item",
+            label: "打印…",
+            shortcut: "Ctrl+Shift+P",
+            disabled: !printSource,
+            onAction: requestPrint,
+          },
           { type: "sep" },
           {
             type: "item",
@@ -1372,6 +1751,8 @@ export default function App() {
     onSave,
     onSaveAs,
     onPreview,
+    requestPrint,
+    printSource,
     openUserFile,
     requestQuit,
     runEditorCommand,
@@ -1641,6 +2022,23 @@ export default function App() {
         cursor={hasMountedEditor ? cursorInfo : null}
       />
 
+      {dropPaths.length > 0 && (
+        <div className="drop-overlay">
+          <div className="drop-overlay-box">
+            <div className="drop-overlay-title">{dropSummary(dropPaths)}</div>
+            <div className="drop-overlay-sub">松开鼠标即可在 Lexora 中打开</div>
+            <ul className="drop-overlay-list">
+              {dropPaths.slice(0, 5).map((p) => (
+                <li key={p}>{baseNameOf(p)}</li>
+              ))}
+            </ul>
+            {dropPaths.length > 5 && (
+              <div className="drop-overlay-sub">…共 {dropPaths.length} 项</div>
+            )}
+          </div>
+        </div>
+      )}
+
       {notice && (
         <div className="notice">
           <span>{notice}</span>
@@ -1667,6 +2065,10 @@ export default function App() {
           onDeleteVscodeTheme={deleteVscodeTheme}
           onPickEditorFont={(s) => pickFontFor(s, "editor")}
           onPickPreviewFont={(s) => pickFontFor(s, "preview")}
+          assoc={assoc}
+          onAssocRegister={onAssocRegister}
+          onAssocUnregister={onAssocUnregister}
+          onOpenDefaultApps={onOpenDefaultApps}
         />
       )}
 
@@ -1701,7 +2103,7 @@ export default function App() {
       )}
 
       {bigFileAsk && (
-        <Modal title="打开大文件" width={460} onClose={() => setBigFileAsk(null)}>
+        <Modal title="打开大文件" width={460} onClose={shiftBigFileAsk}>
           <div className="info-body">
             <p>
               文件 <b>{(bigFileAsk.path.split(/[\\/]/).pop() ?? bigFileAsk.path)}</b>{" "}
@@ -1709,16 +2111,44 @@ export default function App() {
               {Math.round(LARGE_FILE_WARN_BYTES / 1048576)}MB）。大文件会占用较多内存与
               打开时间，建议在<b>后台打开</b>：不切换当前标签，加载完成后用标签栏切换。
             </p>
+            {bigAskQueueRef.current.length > 0 && (
+              <p className="hint">还有 {bigAskQueueRef.current.length} 个大文件待确认。</p>
+            )}
           </div>
           <div className="modal-foot">
             <button className="btn primary" onClick={() => void confirmOpenBig()}>
               后台打开
             </button>
-            <button className="btn" onClick={() => setBigFileAsk(null)}>
+            <button className="btn" onClick={shiftBigFileAsk}>
               取消
             </button>
           </div>
         </Modal>
+      )}
+
+      {externalAsk && (
+        <ExternalChangeDialog
+          title={externalAsk.title}
+          path={externalAsk.path}
+          dirty={externalAsk.dirty}
+          current={externalAsk.stat}
+          remaining={externalQueueRef.current.length}
+          onReload={() => void resolveExternalAsk(true)}
+          onKeep={() => void resolveExternalAsk(false)}
+        />
+      )}
+
+      {printAsk && (
+        <PrintDialog
+          title={printAsk.title}
+          modes={printAsk.modes}
+          onCancel={() => setPrintAsk(null)}
+          onPick={(mode) => {
+            const ask = printAsk;
+            setPrintAsk(null);
+            void runPrint(ask.tabId, ask.kind, mode);
+          }}
+        />
       )}
     </div>
   );

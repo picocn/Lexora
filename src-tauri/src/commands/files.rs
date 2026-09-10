@@ -1,6 +1,7 @@
 use serde::Serialize;
 use std::fs;
 use std::path::Path;
+use std::time::UNIX_EPOCH;
 
 use crate::paths;
 
@@ -126,9 +127,128 @@ pub fn path_exists(path: String) -> bool {
     Path::new(&path).exists()
 }
 
+/// Cheap "did this file change on disk" probe used by the external-change
+/// watcher. Never fails: an unreadable/missing path is simply "not there",
+/// so the frontend can poll it without try/catch noise.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileStat {
+    pub exists: bool,
+    pub byte_len: u64,
+    /// Last modification time in millis since the UNIX epoch; 0 when unknown
+    /// (missing file or a filesystem without mtime support).
+    pub modified_ms: u64,
+}
+
+pub fn file_stat_impl(path: &str) -> FileStat {
+    match fs::metadata(path) {
+        Ok(meta) => FileStat {
+            exists: true,
+            byte_len: meta.len(),
+            modified_ms: meta
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0),
+        },
+        Err(_) => FileStat {
+            exists: false,
+            byte_len: 0,
+            modified_ms: 0,
+        },
+    }
+}
+
+#[tauri::command]
+pub async fn file_stat(path: String) -> FileStat {
+    file_stat_impl(&path)
+}
+
+/// Which of the paths the user dropped are regular files, directories or gone.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PathKind {
+    pub path: String,
+    /// `"file"` | `"dir"` | `"missing"`.
+    pub kind: String,
+}
+
+pub fn classify_paths_impl(paths: &[String]) -> Vec<PathKind> {
+    paths
+        .iter()
+        .map(|path| {
+            let kind = match fs::metadata(path) {
+                Ok(meta) if meta.is_dir() => "dir",
+                Ok(_) => "file",
+                Err(_) => "missing",
+            };
+            PathKind {
+                path: path.clone(),
+                kind: kind.to_string(),
+            }
+        })
+        .collect()
+}
+
+/// Classifies dropped paths so the frontend can keep files and folders apart
+/// (folders are expanded/ignored by its own policy) without extra IPC calls.
+#[tauri::command]
+pub async fn classify_paths(paths: Vec<String>) -> Vec<PathKind> {
+    classify_paths_impl(&paths)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn file_stat_reports_len_and_mtime_for_a_temp_file() {
+        let dir = std::env::temp_dir().join(format!("lexora-stat-{}", std::process::id()));
+        let _ = fs::create_dir_all(&dir);
+        let p = dir.join("stat.md");
+        fs::write(&p, "hello 你好").unwrap();
+
+        let st = file_stat_impl(&p.to_string_lossy());
+        assert!(st.exists);
+        assert_eq!(st.byte_len, "hello 你好".len() as u64);
+        assert!(st.modified_ms > 0, "mtime should be available");
+
+        let missing = file_stat_impl(&dir.join("nope.md").to_string_lossy());
+        assert!(!missing.exists);
+        assert_eq!(missing.byte_len, 0);
+        assert_eq!(missing.modified_ms, 0);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn classify_paths_splits_file_dir_and_missing() {
+        let dir = std::env::temp_dir().join(format!("lexora-kind-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("a.md");
+        fs::write(&file, "x").unwrap();
+
+        let sub = dir.join("sub");
+        fs::create_dir_all(&sub).unwrap();
+
+        let input = vec![
+            file.to_string_lossy().into_owned(),
+            sub.to_string_lossy().into_owned(),
+            dir.join("gone.md").to_string_lossy().into_owned(),
+        ];
+        let out = classify_paths_impl(&input);
+        assert_eq!(out.len(), 3);
+        assert_eq!(out[0].kind, "file");
+        assert_eq!(out[0].path, input[0]);
+        assert_eq!(out[1].kind, "dir");
+        assert_eq!(out[2].kind, "missing");
+
+        assert!(classify_paths_impl(&[]).is_empty());
+
+        let _ = fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn base64_encode_matches_known_vectors() {

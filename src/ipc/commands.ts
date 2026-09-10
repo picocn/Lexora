@@ -17,8 +17,42 @@ export interface SnapshotInfo {
   snippet: string;
 }
 
+export interface FileStat {
+  exists: boolean;
+  byteLen: number;
+  modifiedMs: number;
+}
+
+export interface PathKindInfo {
+  path: string;
+  kind: "file" | "dir" | "missing";
+}
+
+/** Result of the portable .md file-association registration (HKCU only). */
+export interface AssocStatus {
+  exePath: string;
+  progId: string;
+  /** Our ProgID key tree exists and points at this executable. */
+  registered: boolean;
+  /** Current default ProgID of the .md extension. */
+  mdDefault: string | null;
+  /** Whether .md currently resolves to this app. */
+  mdPointsToUs: boolean;
+  /** Windows "UserChoice" ProgID, which overrides the fallback association. */
+  userChoice: string | null;
+  /** False on non-Windows builds. */
+  supported: boolean;
+}
+
+export interface PrintDoc {
+  title: string;
+  html: string;
+}
+
 export interface AppSettings {
   autosave: { enabled: boolean; intervalSec: number };
+  /** File-watching / association options. */
+  files: { watchExternal: boolean };
   editor: {
     fontFamily: string;
     fontSize: number;
@@ -35,6 +69,7 @@ export interface AppSettings {
 
 export const DEFAULT_SETTINGS: AppSettings = {
   autosave: { enabled: true, intervalSec: 5 },
+  files: { watchExternal: true },
   editor: {
     fontFamily: "Consolas, 'Courier New', 'Sarasa Mono SC', monospace",
     fontSize: 15,
@@ -197,4 +232,69 @@ export async function benchTargets(): Promise<BenchTargets | null> {
 /** Current process working-set size in KiB. */
 export function processMemKb(): Promise<number> {
   return invoke<number>("process_mem_kb");
+}
+
+// ---- external-change detection ---------------------------------------------
+
+/** Size/mtime snapshot of a file on disk (used to detect outside edits). */
+export function fileStat(path: string): Promise<FileStat> {
+  return invoke<FileStat>("file_stat", { path });
+}
+
+/** Classifies paths as file / dir / missing (drag & drop filtering). */
+export function classifyPaths(paths: string[]): Promise<PathKindInfo[]> {
+  return invoke<PathKindInfo[]>("classify_paths", { paths });
+}
+
+// ---- launch arguments / second instance ------------------------------------
+
+/** Drains the file paths the app was launched with (Explorer "open with"). */
+export function takeLaunchPaths(): Promise<string[]> {
+  return invoke<string[]>("take_launch_paths");
+}
+
+/** Subscribes to paths forwarded by a second launch (single instance). */
+export async function onOpenPaths(cb: (paths: string[]) => void): Promise<() => void> {
+  const { listen } = await import("@tauri-apps/api/event");
+  return await listen<string[]>("open-paths", (e) => cb(e.payload));
+}
+
+// ---- .md file association (Windows, HKCU only) -----------------------------
+
+export function assocStatus(): Promise<AssocStatus> {
+  return invoke<AssocStatus>("assoc_status");
+}
+
+export function registerMdAssociation(): Promise<AssocStatus> {
+  return invoke<AssocStatus>("register_md_association");
+}
+
+export function unregisterMdAssociation(): Promise<AssocStatus> {
+  return invoke<AssocStatus>("unregister_md_association");
+}
+
+/** Opens the Windows "默认应用" settings page (UserChoice override path). */
+export function openDefaultAppsSettings(): Promise<void> {
+  return invoke("open_default_apps_settings");
+}
+
+// ---- printing --------------------------------------------------------------
+
+/** Stores the printable document for the print window to pick up. */
+export function stagePrintDoc(title: string, html: string): Promise<void> {
+  return invoke("stage_print_doc", { title, html });
+}
+
+/** Takes (and clears) the staged printable document. */
+export function takePrintDoc(): Promise<PrintDoc | null> {
+  return invoke<PrintDoc | null>("take_print_doc");
+}
+
+/** Opens (or focuses) the dedicated print window. */
+export function openPrintWindow(): Promise<void> {
+  return invoke("open_print_window");
+}
+
+export function closePrintWindow(): Promise<void> {
+  return invoke("close_print_window");
 }

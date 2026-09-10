@@ -1323,3 +1323,128 @@ button.title-brand {
   left: calc(100% + 2px);
   top: 0; /* align with the first-level item instead of dropping a row */
 }
+
+/* ---------- drag & drop overlay ---------- */
+.drop-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--bg, #fff) 78%, transparent);
+  backdrop-filter: blur(1px);
+  pointer-events: none;
+}
+.drop-overlay-box {
+  min-width: 320px;
+  max-width: 70vw;
+  padding: 18px 22px;
+  border: 2px dashed var(--accent, #0969da);
+  border-radius: 10px;
+  background: var(--panel-bg, #fff);
+  color: var(--fg, #1f2328);
+  box-shadow: 0 10px 30px rgb(0 0 0 / 22%);
+  text-align: center;
+}
+.drop-overlay-title {
+  font-size: 15px;
+  font-weight: 600;
+}
+.drop-overlay-sub {
+  margin-top: 6px;
+  font-size: 12px;
+  opacity: 0.75;
+}
+.drop-overlay-list {
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 12px;
+  opacity: 0.9;
+  max-height: 30vh;
+  overflow: hidden;
+}
+.drop-overlay-list li {
+  padding: 1px 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ---------- settings: file association row ---------- */
+.assoc-row {
+  align-items: flex-start;
+}
+.assoc-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* ---------- print window ---------- */
+.print-view {
+  height: 100%;
+  overflow: auto;
+  background: #fff;
+  color: #111;
+}
+.print-view-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+}
+.print-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid #d0d7de;
+  background: #f6f8fa;
+  font-size: 12px;
+}
+.print-toolbar-title {
+  flex: 1 1 auto;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.print-toolbar-hint {
+  opacity: 0.6;
+}
+.print-body {
+  padding: 18mm 16mm;
+  margin: 0 auto;
+  max-width: 900px;
+  line-height: 1.65;
+  word-wrap: break-word;
+}
+
+@media print {
+  /* Printing must see the whole document, not a single hidden-overflow page. */
+  html,
+  body,
+  #root {
+    height: auto !important;
+    overflow: visible !important;
+  }
+  .no-print {
+    display: none !important;
+  }
+  .print-view {
+    height: auto;
+    overflow: visible;
+    background: #fff;
+  }
+  .print-body {
+    padding: 0;
+    max-width: none;
+  }
+}

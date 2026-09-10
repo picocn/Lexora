@@ -9,31 +9,9 @@ import {
 import { renderMarkdown } from "../preview/render";
 import { renderMermaidIn } from "../preview/mermaid";
 import { dirnameOf, resolveLocalImageSrc } from "../preview/imagePath";
-import { readImageBase64, openExternal } from "../ipc/commands";
+import { loadImageDataUrl, materializeImages, mimeOfPath } from "../preview/fixup";
+import { openExternal } from "../ipc/commands";
 import { PREVIEW_MAX_CHARS } from "../tabs/thresholds";
-
-/** Cache of resolved local image data URLs (path -> data URL). Images do not
- * change within a session; without this the 300ms-debounced re-render would
- * IPC-read + base64-encode every local image on every keystroke. */
-const imageDataUrlCache = new Map<string, string>();
-const IMAGE_CACHE_MAX = 128;
-function cachedImageDataUrl(path: string, mime: string): Promise<string> {
-  const hit = imageDataUrlCache.get(path);
-  if (hit) return Promise.resolve(hit);
-  return readImageBase64(path)
-    .then((b64) => {
-      const url = `data:${mime};base64,${b64}`;
-      if (imageDataUrlCache.size >= IMAGE_CACHE_MAX) {
-        const oldest = imageDataUrlCache.keys().next().value;
-        if (oldest !== undefined) imageDataUrlCache.delete(oldest);
-      }
-      imageDataUrlCache.set(path, url);
-      return url;
-    })
-    .catch((e) => {
-      throw e;
-    });
-}
 
 /** Case/punctuation-insensitive anchor id comparison. */
 function normalizeAnchor(s: string): string {
@@ -86,7 +64,7 @@ async function buildHtmlPreview(text: string, basePath: string | null): Promise<
     const local = resolveLocalImageSrc(src, baseDir);
     if (!local) continue;
     try {
-      img.setAttribute("src", await cachedImageDataUrl(local, mimeOfPath(local)));
+      img.setAttribute("src", await loadImageDataUrl(local, mimeOfPath(local)));
     } catch {
       /* leave the original src */
     }
@@ -165,7 +143,7 @@ export const PreviewPane = forwardRef<PreviewPaneHandle, PreviewPaneProps>(
     // After every HTML refresh: render mermaid diagrams and fix up local image
     // srcs (relative paths resolve against the document's folder; absolute
     // paths work even for unsaved docs). Local files are read via the Rust
-    // command into base64 data URLs.
+    // command into base64 data URLs (see preview/fixup.ts).
     const postProcessTimer = useRef<number | null>(null);
     useEffect(() => {
       const el = scrollRef.current;
@@ -173,7 +151,7 @@ export const PreviewPane = forwardRef<PreviewPaneHandle, PreviewPaneProps>(
       if (postProcessTimer.current) window.clearTimeout(postProcessTimer.current);
       postProcessTimer.current = window.setTimeout(() => {
         void renderMermaidIn(el);
-        void fixupImages(el, basePath ?? null);
+        void materializeImages(el, basePath ?? null);
       }, 0);
       return () => {
         if (postProcessTimer.current) window.clearTimeout(postProcessTimer.current);
@@ -375,58 +353,4 @@ function offsetTopIn(container: HTMLElement, child: HTMLElement): number {
   const cRect = container.getBoundingClientRect();
   const eRect = child.getBoundingClientRect();
   return eRect.top - cRect.top + container.scrollTop;
-}
-
-/**
- * Rewrites <img src> of local files so the webview can load them.
- * - http(s)/data URLs are left untouched (resolveLocalImageSrc rejects them).
- * - Relative paths are resolved against the document directory (basePath).
- * - Absolute local paths are resolved even when the doc is unsaved
- *   (basePath == null).
- * - Local files are read through the Rust command into a base64 data URL
- *   (robust for CJK / space / any-character paths - the asset protocol and
- *   percent-encoding are deliberately not used here).
- */
-async function fixupImages(container: HTMLElement, basePath: string | null): Promise<void> {
-  // Relative srcs need a document dir; absolute srcs don't (resolveLocalImageSrc
-  // handles those without baseDir). So baseDir may legitimately be null here.
-  const baseDir = basePath ? dirnameOf(basePath) : null;
-  const imgs = Array.from(container.querySelectorAll<HTMLImageElement>("img"));
-  if (!imgs.length) return;
-
-  for (const img of imgs) {
-    const src = img.getAttribute("src");
-    if (!src) continue;
-    const local = resolveLocalImageSrc(src, baseDir);
-    if (!local) continue; // remote/data URLs render natively
-    try {
-      const mime = mimeOfPath(local);
-      img.src = await cachedImageDataUrl(local, mime);
-      img.onerror = () => {
-        img.onerror = null;
-        img.setAttribute("title", `无法加载图片：${src}`);
-      };
-    } catch {
-      img.setAttribute("title", `无法加载图片：${src}`);
-      img.setAttribute("alt", `[无法加载图片：${src}]`);
-    }
-  }
-}
-
-const MIME_BY_EXT: Record<string, string> = {
-  png: "image/png",
-  jpg: "image/jpeg",
-  jpeg: "image/jpeg",
-  gif: "image/gif",
-  webp: "image/webp",
-  bmp: "image/bmp",
-  svg: "image/svg+xml",
-  ico: "image/x-icon",
-  avif: "image/avif",
-};
-
-function mimeOfPath(p: string): string {
-  const i = p.lastIndexOf(".");
-  const ext = i >= 0 ? p.slice(i + 1).toLowerCase() : "";
-  return MIME_BY_EXT[ext] ?? "application/octet-stream";
 }

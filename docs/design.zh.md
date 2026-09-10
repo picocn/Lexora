@@ -8,14 +8,18 @@
 ┌────────────────────────────────────────────────────────────┐
 │ React 18 渲染层（WebView2，生产 CSP 由 tauri 注入）          │
 │  App.tsx 状态编排  ·  components/* UI  ·  tabs/ 状态机      │
-│  editor/ CodeMirror6  ·  preview/ 渲染  ·  ipc/ 命令封装    │
+│  editor/ CodeMirror6  ·  preview/ 渲染  ·  files/ 文件输入   │
+│  print/ 打印文档  ·  ipc/ 命令封装                          │
+│  PrintView（label=print 的窗口渲染打印内容，非工作台）        │
 ├────────────────────────────────────────────────────────────┤
 │ Tauri 2 IPC（invoke + 能力授权 capabilities/default.json）   │
+│  单实例插件：第二次启动把 argv 转发给现有实例（open-paths）    │
 ├────────────────────────────────────────────────────────────┤
 │ Rust 后端（src-tauri）                                      │
-│  commands/{files,snapshots,settings,session,font,bench}    │
+│  commands/{files,snapshots,settings,session,font,bench,    │
+│            launch,assoc,print_doc}                         │
 │  paths.rs（可移植目录）  window_state.rs（几何持久化）       │
-│  本地文件系统（原文件 / settings\ / autosave\）             │
+│  本地文件系统（原文件 / settings\ / autosave\）· HKCU 关联   │
 └────────────────────────────────────────────────────────────┘
 ```
 - 单进程多 WebView 子进程（WebView2 实际内存都落在 msedgewebview2.exe 侧，主进程约 27MB）。
@@ -40,7 +44,7 @@
 | `PREVIEW_MAX_CHARS` | 8,000,000 | 预览 OOM 护栏 |
 
 ### AppSettings（settings.json）
-autosave{enabled,intervalSec}、editor{fontFamily,fontSize,lineHeight,tabSize,wordWrap,lineNumbers}、preview{fontFamily,fontSize}、theme{kind:'builtin'|'vscode',id}、layout:'split'|'edit'|'preview'、recentFiles(≤20)
+autosave{enabled,intervalSec}、editor{fontFamily,fontSize,lineHeight,tabSize,wordWrap,lineNumbers}、preview{fontFamily,fontSize}、theme{kind:'builtin'|'vscode',id}、layout:'split'|'edit'|'preview'、recentFiles(≤20)、files{watchExternal}
 - 读取为“默认值对象 + 覆盖合并”（serde 缺字段默认；前端 settings 会话恢复跳过超大）。
 - 数字字段容错：u64 字段经浮点取整 deserializer 接受小数输入。
 - 最近文件两侧裁剪：前端 `pushRecent` 与 Rust `read_settings` 均 `take(20)`。
@@ -68,6 +72,13 @@ autosave{enabled,intervalSec}、editor{fontFamily,fontSize,lineHeight,tabSize,wo
 | path_exists | path | bool |
 | read_image_base64 | path | base64 字符串（≤40MB，且必须 `is_file()`） |
 | open_external | url | ()（仅 http/https，经 rundll32 FileProtocolHandler） |
+| file_stat | path | {exists,byteLen,modifiedMs}（外部修改检测基线/比对） |
+| classify_paths | paths | [{path,kind:"file"\|"dir"\|"missing"}]（拖放过滤） |
+| take_launch_paths | - | []（启动参数中待打开的文件，取走即清空） |
+| assoc_status / register_md_association / unregister_md_association | - | AssocStatus{exePath,progId,registered,mdDefault,mdPointsToUs,userChoice,supported} |
+| open_default_apps_settings | - | ()（`ms-settings:defaultapps`） |
+| stage_print_doc / take_print_doc | title,html / - | () / {title,html}\|null（打印槽，取走即清空；>32MB 拒绝） |
+| open_print_window / close_print_window | - | ()（创建/聚焦/关闭 `print` 窗口） |
 | snapshot_write / list / read / remove | docKey,… / - / key / key | - / Info[] / Content / - |
 | read_settings / write_settings | - / settings | AppSettings / () |
 | session_save / load | paths,activePath / - | () / Session |
@@ -76,7 +87,8 @@ autosave{enabled,intervalSec}、editor{fontFamily,fontSize,lineHeight,tabSize,wo
 | bench_targets / process_mem_kb（内部，仅当 `settings/bench-targets.json` 存在时生效） | - | BenchTargets\|err / KiB |
 
 - 文件与快照类命令均为 **async 包装 + `*_impl` 同步实现**：命令体只 `spawn_blocking` 调用 impl，单元测试直接调 impl，避免测试期依赖 Tauri 运行时。
-- 能力（capabilities/default.json）：core:default + window allow-close/destroy/minimize/toggle-maximize/**is-maximized**/start-dragging + dialog:default。
+- 能力（capabilities/default.json）：core:default + window allow-close/destroy/minimize/toggle-maximize/**is-maximized**/start-dragging + dialog:default；`windows: ["main", "print"]`（打印窗口需要 `allow-close` 自我关闭）。
+- 应用命令（invoke_handler 注册的自定义命令）不受能力表约束；能力表只影响 core/插件命令。
 
 ## 5. 核心流程
 
@@ -132,6 +144,25 @@ autosave{enabled,intervalSec}、editor{fontFamily,fontSize,lineHeight,tabSize,wo
 - 退出应用：不再询问（自动快照+退出）
 - 关闭单个未保存标签：仍询问 保存/不保存并关闭/取消
 
+### 5.10 拖放与外部传入
+- **拖放**：`getCurrentWebview().onDragDropEvent` → `enter/over` 存 `dropPaths` 显示浮层；`drop` 清空浮层并把路径交给 `handleDroppedPaths`（先 `classify_paths` 过滤出真实文件，再用 `isLikelyTextFile` 去掉图片/音视频/压缩包，最后逐个走 `openUserFile`，因此 L1 大文件确认同样生效，多个大文件进入确认队列）
+- **启动参数**：Rust `setup` 用 `collect_open_args(std::env::args().skip(1))` 收集存在的文件（忽略选项式参数、去重、大小写不敏感）；前端启动流程末尾 `take_launch_paths()` 取走并打开
+- **单实例**：`tauri-plugin-single-instance`（必须在其它插件之前注册）在第二次启动时把 argv 交给 `push_launch_paths`，后者写入状态并 `emit("open-paths")`，同时 `set_focus`/`unminimize` 主窗口；前端 `listen("open-paths")` 再打开这些文件
+
+### 5.11 外部修改检测
+- 基线：每次打开文件（`openLoaded`）与每次手动保存后 `file_stat` 记录 {modifiedMs, byteLen} 到 `diskStatRef`
+- 轮询：设置开启（`files.watchExternal`，默认 true）时每 3 秒对“已加载且有路径的编辑标签”逐个 `file_stat`，`statsDiffer(基线, 当前)` 判定（大小或 mtime 变化、或文件消失）
+- 发现变化：**立即把当前 stat 写回基线**（同一次变化只提示一次），再弹窗询问；多个文件排队逐个确认
+- 重新加载：`readTextFile` → `store.reloadBigTab`（原地替换，保留 id/顺序；按 `languageOverride` 或新文件名重配语言；≥4000 万字符关闭撤销历史）→ 更新基线 → 清理该 docKey 的过期快照
+- 保留当前编辑：不动缓冲区，仅保留新基线；标签若为脏，提示文案明确说明重载会丢失未保存内容
+
+### 5.12 打印
+- 入口：文件 →「打印…」（Ctrl+Shift+P）；`printSource` 把预览标签解析回其源编辑标签
+- 模式选择：`printModesFor(kind)` —— markdown → `preview`/`raw`（弹 `PrintDialog` 二选一）；html/text → 仅 `raw`（直接打印原文，不询问）
+- 内容构建：`buildPrintContent`（`raw` 走 `rawPrintHtml` 转义；`preview` 需要 `renderedHtml`）+ `buildPrintCss`（`@page` 16mm、分页避让、`print-color-adjust: exact`、`.print-raw` 等宽）；markdown 预览版用 `prepareMarkdownPrint`（渲染 → mermaid 内联 SVG（失败退回代码块）→ `materializeImages` 内联本地图片）
+- 交付方式：`stage_print_doc(title, html)` 写入 Rust 打印槽 → `open_print_window()` 创建/聚焦 `print` 窗口 → 该窗口的 `main.tsx` 按 `getCurrentWindow().label === "print"` 分流渲染 `PrintView` → `take_print_doc()` 取一次（模块级缓存兼容 StrictMode 双调用）→ 渲染后 400ms 自动 `window.print()`，并提供「打印」按钮与 Ctrl+P 兜底；关闭走 `close_print_window`
+- 隔离：打印窗口只加载应用自身资源（CSP 不变），文档内容为纯 HTML（无脚本），本地图片已内联为 data URL
+
 ## 6. 安全与健壮性
 | 项 | 措施 |
 |---|---|
@@ -141,6 +172,9 @@ autosave{enabled,intervalSec}、editor{fontFamily,fontSize,lineHeight,tabSize,wo
 | Markdown/HTML | markdown-it `html:false`；HTML 预览 iframe `sandbox=""` + 文档内 CSP |
 | 快照可信 | key 字符集白名单（防穿越）+ `originalPath` 与 stem 哈希一致性校验 |
 | 主题输入 | 颜色 `^#[0-9a-fA-F]{3,8}$`、字体栈清洗，非法回退 |
+| 文件关联 | 仅写 `HKCU\Software\Classes`（绝不 HKLM、不申请提权）；`reg.exe` 参数由纯函数 `register_plan`/`to_argv` 生成并单测；取消注册只删除自建键，`.md` 默认值仅在等于本 ProgID 时清除 |
+| 外部打开 | 命令行参数只接受“存在且是文件”的路径（`Path::is_file()`）；接收方再次校验后走常规打开流程 |
+| 打印 | 打印窗口加载应用自身资源（同一 CSP，无脚本注入面）；`stage_print_doc` 限制 32MB 且取走即清空 |
 | 编码 | UTF-16/32 拒读；非 UTF-8 原文禁原地保存；BOM 同文件保存保留 |
 | FFI | 仅 font.rs ChooseFontW（结构体 x64 布局校验、线程消息队列），bench.rs PSAPI（Windows 条件编译） |
 | 错误口径 | 全部走 `Result` 文案，失败保留原状态并提示，不静默吞错 |
@@ -150,11 +184,17 @@ autosave{enabled,intervalSec}、editor{fontFamily,fontSize,lineHeight,tabSize,wo
 - 超大文档编辑：驻留上限策略缓解，仍有边界 GC 尖峰（可下调 K）
 - 非 UTF-8 原文不支持原地编辑
 - 无 Windows 10/11 之外的构建目标
+- 窗口开启了 Tauri 的原生拖放（`dragDropEnabled`，文件拖入必需），因此网页层的 HTML5 拖放事件不可用；编辑器内的“拖动选中文本移动”属该限制范围
+- 打印依赖 WebView2 的 `window.print()`（Tauri 文档标注“所有平台可用”）：打印窗口内自动调用一次，失败时可用窗口内「打印」按钮或 Ctrl+P 手动触发；HTML 文件按需求只提供“原始文本”打印
+- 文件关联为“回退关联”：Windows 已存在 `.md` 的 UserChoice 时系统优先使用它，此时需在系统默认应用设置中手动指定（设置页提供入口）
 
 ## 8. 目录导览
 ```
 src-tauri/src/        lib.rs · paths.rs · window_state.rs · commands/*
-src/                  App.tsx · components/ · editor/ · preview/ · tabs/ · ipc/ · styles/
+src/                  App.tsx · components/ · editor/ · preview/ · tabs/ · files/ · print/ · ipc/ · styles/
 scripts/              bump-version.mjs · crates-proxy.mjs · gen-icon.mjs
 docs/                 requirements · design · acceptance · large-file-strategy · release-notes
 ```
+- `src/files/`：外部修改判定（`externalChange.ts`）与拖放路径过滤/摘要（`dropPaths.ts`），均为纯函数 + 单测
+- `src/print/`：打印文档构建（`build.ts`）与 markdown 打印前处理（`prepare.ts`）
+- `src/preview/fixup.ts`：本地图片内联（data URL + 模块级缓存），预览与打印共用

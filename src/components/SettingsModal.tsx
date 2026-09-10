@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { AppSettings } from "../ipc/commands";
+import type { AppSettings, AssocStatus } from "../ipc/commands";
 import { DEFAULT_SETTINGS } from "../ipc/commands";
 import { Modal } from "./Modal";
 
@@ -27,6 +27,23 @@ export interface SettingsModalProps {
   onPickEditorFont: (current: AppSettings) => Promise<FontPickResult | null>;
   /** Opens the OS font dialog for the preview font. */
   onPickPreviewFont: (current: AppSettings) => Promise<FontPickResult | null>;
+  /** Current .md file-association state (null while loading / unsupported). */
+  assoc: AssocStatus | null;
+  onAssocRegister: () => Promise<void>;
+  onAssocUnregister: () => Promise<void>;
+  /** Opens the Windows "默认应用" settings page. */
+  onOpenDefaultApps: () => Promise<void>;
+}
+
+/** One-line Chinese description of the current .md association state. */
+export function describeAssoc(status: AssocStatus | null): string {
+  if (!status) return "正在检测…";
+  if (!status.supported) return "仅 Windows 支持注册文件关联。";
+  if (status.userChoice && !status.mdPointsToUs) {
+    return `当前 .md 由“${status.userChoice}”接管（Windows 用户选择优先于本设置）。可点“Windows 默认应用设置”改为 Lexora。`;
+  }
+  if (status.mdPointsToUs) return "已注册：双击 .md 文件将使用 Lexora 打开。";
+  return "未注册：.md 文件仍使用系统当前默认程序打开。";
 }
 
 /** The leading family of a CSS font stack (for the OS dialog seed). */
@@ -71,6 +88,19 @@ export function SettingsModal(p: SettingsModalProps) {
           preview: { ...d.preview, fontFamily: stackOf(res.family), fontSize: res.sizePx },
         }));
       }
+    } catch (e) {
+      setErr(String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /** Runs a file-association action with the shared busy/error handling. */
+  const runAssoc = async (fn: () => Promise<void>) => {
+    setErr(null);
+    setBusy(true);
+    try {
+      await fn();
     } catch (e) {
       setErr(String(e));
     } finally {
@@ -275,6 +305,49 @@ export function SettingsModal(p: SettingsModalProps) {
               <option value="preview">仅预览</option>
             </select>
           </label>
+        </fieldset>
+        <fieldset>
+          <legend>文件</legend>
+          <label className="row">
+            <input
+              type="checkbox"
+              checked={draft.files.watchExternal}
+              onChange={(e) =>
+                set("files", { ...draft.files, watchExternal: e.target.checked })
+              }
+            />
+            检测文件被外部修改（提示是否重新加载）
+          </label>
+          <p className="hint">
+            每 3 秒检查一次已打开文件的修改时间与大小；发现变化时弹窗询问“重新加载”或“保留当前编辑”。
+          </p>
+          <div className="row assoc-row">
+            <span>Markdown 打开方式</span>
+            <div className="assoc-actions">
+              <button
+                className="btn"
+                disabled={busy || !p.assoc?.supported}
+                onClick={() => void runAssoc(p.onAssocRegister)}
+              >
+                注册为默认 .md 打开方式
+              </button>
+              <button
+                className="btn"
+                disabled={busy || !p.assoc?.supported}
+                onClick={() => void runAssoc(p.onAssocUnregister)}
+              >
+                取消注册
+              </button>
+              <button
+                className="btn"
+                disabled={busy || !p.assoc?.supported}
+                onClick={() => void runAssoc(p.onOpenDefaultApps)}
+              >
+                Windows 默认应用设置…
+              </button>
+            </div>
+          </div>
+          <p className="hint">{describeAssoc(p.assoc)}</p>
         </fieldset>
         {err && <div className="form-error">{err}</div>}
       </div>
