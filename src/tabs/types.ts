@@ -44,6 +44,10 @@ export interface Tab {
   /** True when a very large clean tab was unloaded to a lightweight
    * placeholder (cmState holds an empty doc; reloaded on activation). */
   unloaded?: boolean;
+  /** Memoised LF-normalised disk anchor for the dirty check (see tabDirty). */
+  diskLfAnchor?: string;
+  /** The exact model.diskContent `diskLfAnchor` was derived from. */
+  diskLfSource?: string;
 }
 
 export interface TabsState {
@@ -57,21 +61,47 @@ export function isEditor(t: Tab): boolean {
 }
 
 export function isPreview(t: Tab): boolean {
-  return t.model.kind === "preview";
+  return (t.model.kind === "preview");
+}
+
+/** Line-ending-insensitive comparison for the dirty check.
+ *
+ * CodeMirror normalises CRLF/CR to LF when a document is created from a string,
+ * while `diskContent` holds the file bytes verbatim. Without this, every CRLF
+ * file (the Windows default) looked dirty the moment it was opened: the ● mark
+ * showed up and autosave wrote recovery snapshots on every tick even though the
+ * user had not typed anything.
+ *
+ * Back-ported from the Go + Wails migration (`lexora-go`), where the same bug
+ * was found; the two projects share this frontend. */
+function normalizeEol(s: string): string {
+  return s.indexOf("\r") === -1 ? s : s.replace(/\r\n?/g, "\n");
 }
 
 /** True when the current editor content differs from the disk anchor.
  * Preview tabs are never dirty; unloaded (placeholder) tabs are clean by
  * definition - they were only unloaded while content == disk.
- * Cost-sensitive: compares lengths first, so per-keystroke render paths
- * (dirty dots, status bar, L3 capacity scans) never materialize the full
- * document string unless lengths are equal. */
+ *
+ * `diskContent` holds the file bytes verbatim while the CodeMirror doc holds
+ * LF-normalised text, so the comparison runs against a memoised LF anchor
+ * (derived once per open/save, keyed by the exact `diskContent` string so a new
+ * open/save invalidates it automatically). Lengths are compared first, so the
+ * common "just typed" case never materializes the document. */
 export function tabDirty(tab: Tab): boolean {
   if (!isEditor(tab) || tab.unloaded) return false;
   const doc = tab.cmState.doc;
   const disk = tab.model.diskContent;
-  if (doc.length !== disk.length) return true;
-  return doc.toString() !== disk;
+  let anchor = tab.diskLfAnchor;
+  if (anchor === undefined || tab.diskLfSource !== disk) {
+    anchor = normalizeEol(disk);
+    tab.diskLfAnchor = anchor;
+    tab.diskLfSource = disk;
+  }
+  // Different length => different content, no allocation needed.
+  if (doc.length !== anchor.length) return true;
+  // Equal length: one string compare decides (fast when lengths already match
+  // but the bytes do not, which is the typical per-keystroke case).
+  return doc.toString() !== anchor;
 }
 
 /** Current editor text of a tab ("" for preview tabs). */

@@ -29,10 +29,13 @@
 ## 2. 关键数据结构
 ### Tab / TabsState（src/tabs/types.ts）
 - `TabModel`：id(kind 前缀 file:/untitled:/preview:)、title、path、docKey(=path 或未命名 id)、sourceTabId、manualSaved、diskContent、utf8Ok/utf8Bom、languageOverride
-- `Tab`：model + `cmState`(EditorState) + `comps`(lang/theme/prefs Compartment) + langExt + lastSnapshotContent + `unloaded?`
+- `Tab`：model + `cmState`(EditorState) + `comps`(lang/theme/prefs Compartment) + langExt + lastSnapshotContent + `unloaded?` + `diskLfAnchor?`/`diskLfSource?`（脏判定的 LF 锚点缓存）
   - `unloaded=true`：L3 退化为占位（保留 id/顺序/languageOverride，`diskContent` 清空以免脏判定误判），激活时原地重载
 - `TabsState`：tabs[] + activeId + nextUntitled
-- 脏判定 `tabDirty(tab)`：**先比 `doc.length` 再比 `toString()`**，避免每次 tick 对超大文档做全量字符串化（性能不变量）
+- 脏判定 `tabDirty(tab)`：**先把磁盘锚点按行尾规范化并缓存（CRLF/CR → LF），再比长度、后比字符串**。
+  CodeMirror 文档统一为 LF，而 `diskContent` 是磁盘原文，不规范化会让每个 CRLF 文件一打开就被判脏；
+  缓存以 `diskContent` 字符串身份为键，新的打开/保存自动失效。（性能不变量：避免每次 tick 对超大文档做全量规范化/字符串化）
+- **行尾语义**：编辑器内部统一 LF，因此手动保存/另存为写出的行尾是 LF —— CRLF（或 CR）文件保存后行尾被规范化。这是 CodeMirror 文档模型决定的既有行为，如需保留原行尾需另行实现（见 §7）
 
 ### 阈值集中定义（src/tabs/thresholds.ts）
 | 常量 | 值 | 用途 |
@@ -186,6 +189,9 @@ autosave{enabled,intervalSec}、editor{fontFamily,fontSize,lineHeight,tabSize,wo
 - 预览为整篇渲染：>800 万字符禁用（OOM 护栏）；远期可做分段/虚拟化预览
 - 超大文档编辑：驻留上限策略缓解，仍有边界 GC 尖峰（可下调 K）
 - 非 UTF-8 原文不支持原地编辑
+- **保存写入的行尾为 LF**：编辑器内部统一使用 LF（CodeMirror 文档模型），手动保存/另存为会把 CRLF/CR
+  文件的行尾规范化为 LF。此行为自 0.3.x 起即存在；如需保留原行尾，需要额外记录磁盘行尾类型并在写盘时还原（未实现）
+- 脏判定按行尾规范化后比较：CRLF 文件打开即视为干净（不再误报 ● 与快照）
 - 无 Windows 10/11 之外的构建目标
 - 窗口开启了 Tauri 的原生拖放（`dragDropEnabled`，文件拖入必需），因此网页层的 HTML5 拖放事件不可用；编辑器内的“拖动选中文本移动”属该限制范围
 - 打印走 WebView2 的**系统打印对话框**（`ICoreWebView2_16::ShowPrintUI`，要求运行时 ≥ 1.0.1518）；不支持时工具栏提供「在浏览器中打印」后备路径。**禁止改用 `window.print()`**：那会打开 Chromium 的 `edge://print` 预览页，在部分运行时为空白且无法关闭
