@@ -18,6 +18,10 @@
   并在写盘时还原（未实现，见 `docs/design.zh.md` §7）。
 - 回灌来源：Go + Wails 迁移工程（`lexora-go`，P0 期间发现同一缺陷）；两端共用同一份前端，
   修复与测试已同步回本仓库。设计文档 §2 的脏判定/行尾语义、§7 已知限制已同步更新。
+- **构建产物（0.4.2）**：`src-tauri/target/release/lexora.exe`（8.84 MB）、
+  `bundle/nsis/Lexora_0.4.2_x64-setup.exe`（4.14 MB）、`bundle/msi/Lexora_0.4.2_x64_en-US.msi`（5.04 MB）。
+  端到端验证（真实构建 + CDP，脚本 `scripts/e2e/crlf-dirty-check.mjs`）：
+  0.4.1 打开 CRLF 文件显示「● 未保存」并在 13 秒内写入恢复快照；0.4.2 显示「已保存」且 autosave 目录保持为空。
 
 ## 0.4.1（打印修复）
 - **修复：打印页空白且无法关闭**。原因有两处：
